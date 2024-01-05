@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/da"
-	"github.com/sunrise-zone/sunrise-app/pkg/wrapper"
-
 	"github.com/celestiaorg/nmt"
 	"github.com/celestiaorg/rsmt2d"
+	"github.com/sunrise-zone/sunrise-app/pkg/da"
+	"github.com/sunrise-zone/sunrise-app/pkg/wrapper"
 )
 
 // WalkInstruction wraps the bool type to indicate the direction that should be
@@ -31,7 +30,7 @@ func newSubTreeRootCacher() *subTreeRootCacher {
 	return &subTreeRootCacher{cache: make(map[string][2]string)}
 }
 
-// Visit fulfills the nmt.NodeVisitorFn function definition. It stores each inner
+// Visit fullfills the nmt.NodeVisitorFn function definition. It stores each inner
 // node in a simple map, which can later be used to walk the tree. This function
 // is called by the nmt when calculating the root.
 func (strc *subTreeRootCacher) Visit(hash []byte, children ...[]byte) {
@@ -58,7 +57,7 @@ func (strc subTreeRootCacher) walk(root []byte, path []WalkInstruction) ([]byte,
 	// try to lookup the provided sub root
 	children, has := strc.cache[string(root)]
 	if !has {
-		// note: we might want to consider panicking here
+		// note: we might want to consider panicing here
 		return nil, fmt.Errorf("did not find sub tree root: %v", root)
 	}
 
@@ -93,7 +92,7 @@ func NewSubtreeCacher(squareSize uint64) *EDSSubTreeRootCacher {
 	}
 }
 
-// Constructor fulfills the rsmt2d.TreeCreatorFn by keeping a pointer to the
+// Constructor fullfills the rsmt2d.TreeCreatorFn by keeping a pointer to the
 // cache and embedding it as a nmt.NodeVisitor into a new wrapped nmt.
 func (stc *EDSSubTreeRootCacher) Constructor(axis rsmt2d.Axis, axisIndex uint) rsmt2d.Tree {
 	// see docs of counter field for more

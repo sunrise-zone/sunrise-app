@@ -4,18 +4,18 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
+	coretypes "github.com/cometbft/cometbft/types"
 )
 
 type sequence struct {
-	blob        *blob.Blob
+	blob        coretypes.Blob
 	sequenceLen uint32
 }
 
 // parseSparseShares iterates through rawShares and parses out individual
 // blobs. It returns an error if a rawShare contains a share version that
 // isn't present in supportedShareVersions.
-func parseSparseShares(shares []Share, supportedShareVersions []uint8) (blobs []*blob.Blob, err error) {
+func parseSparseShares(shares []Share, supportedShareVersions []uint8) (blobs []coretypes.Blob, err error) {
 	if len(shares) == 0 {
 		return nil, nil
 	}
@@ -56,7 +56,12 @@ func parseSparseShares(shares []Share, supportedShareVersions []uint8) (blobs []
 			if err != nil {
 				return nil, err
 			}
-			blob := blob.New(ns, data, version)
+			blob := coretypes.Blob{
+				NamespaceID:      ns.ID,
+				Data:             data,
+				ShareVersion:     version,
+				NamespaceVersion: ns.Version,
+			}
 			sequences = append(sequences, sequence{
 				blob:        blob,
 				sequenceLen: sequenceLen,

@@ -5,7 +5,10 @@ import (
 
 	abci "github.com/cometbft/cometbft/abci/types"
 	tmrand "github.com/cometbft/cometbft/libs/rand"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdktx "github.com/cosmos/cosmos-sdk/types/tx"
 	"github.com/stretchr/testify/require"
+	"github.com/sunrise-zone/sunrise-app/app"
 	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
 	"github.com/sunrise-zone/sunrise-app/pkg/da"
 	"github.com/sunrise-zone/sunrise-app/pkg/shares"
@@ -14,6 +17,8 @@ import (
 	"github.com/sunrise-zone/sunrise-app/test/util/blobfactory"
 	"github.com/sunrise-zone/sunrise-app/test/util/testfactory"
 	"github.com/sunrise-zone/sunrise-app/test/util/testnode"
+	"github.com/sunrise-zone/sunrise-app/x/blob"
+	blobtypes "github.com/sunrise-zone/sunrise-app/x/blob/types"
 )
 
 // TestOutOfOrderNMT tests that the malicious NMT implementation is able to
@@ -69,7 +74,7 @@ func TestMaliciousTestNode(t *testing.T) {
 	}
 	accounts := testfactory.RandomAccountNames(5)
 	cfg := OutOfOrderNamespaceConfig(5).
-		WithFundedAccounts(accounts...)
+		WithAccounts(accounts)
 
 	cctx, _, _ := testnode.NewNetwork(t, cfg)
 	_, err := cctx.WaitForHeight(6)
@@ -78,10 +83,17 @@ func TestMaliciousTestNode(t *testing.T) {
 	// submit a multiblob tx where each blob is using a random namespace. This
 	// will result in the first two blobs being swapped in the square as per the
 	// malicious square builder.
-	signer, err := testnode.NewSignerFromContext(cctx, accounts[0])
-	require.NoError(t, err)
-	blobs := blobfactory.ManyRandBlobs(tmrand.NewRand(), 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000)
-	txres, err := signer.SubmitPayForBlob(cctx.GoContext(), blobs, blobfactory.DefaultTxOpts()...)
+	signer := blobtypes.NewKeyringSigner(cctx.Keyring, accounts[0], cctx.ChainID)
+	blobs := blobfactory.ManyRandBlobs(t, tmrand.NewRand(), 10_000, 10_000, 10_000, 10_000, 10_000, 10_000, 10_000)
+	txres, err := blob.SubmitPayForBlob(
+		cctx.GoContext(),
+		signer,
+		cctx.GRPCClient,
+		sdktx.BroadcastMode_BROADCAST_MODE_BLOCK,
+		blobs,
+		blobtypes.SetGasLimit(1_000_000),
+		blobtypes.SetFeeAmount(sdk.NewCoins(sdk.NewCoin(app.BondDenom, sdk.NewInt(1_000_000)))),
+	)
 	require.NoError(t, err)
 	require.Equal(t, abci.CodeTypeOK, txres.Code)
 

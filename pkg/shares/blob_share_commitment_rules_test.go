@@ -1,13 +1,11 @@
-package inclusion
+package shares
 
 import (
 	"fmt"
 	"testing"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/da"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
 )
 
 func TestBlobSharesUsedNonInteractiveDefaults(t *testing.T) {
@@ -234,7 +232,7 @@ func TestNextShareIndex(t *testing.T) {
 			name:          "at threshold",
 			cursor:        11,
 			blobLen:       appconsts.DefaultSubtreeRootThreshold,
-			squareSize:    da.RoundUpPowerOfTwo(appconsts.DefaultSubtreeRootThreshold),
+			squareSize:    RoundUpPowerOfTwo(appconsts.DefaultSubtreeRootThreshold),
 			expectedIndex: 11,
 		},
 		{
@@ -295,7 +293,7 @@ func TestNextShareIndex(t *testing.T) {
 	}
 }
 
-func Test_roundUpByMultipleOf(t *testing.T) {
+func Test_roundUpBy(t *testing.T) {
 	type test struct {
 		cursor, v     int
 		expectedIndex int

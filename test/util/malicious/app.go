@@ -3,13 +3,13 @@ package malicious
 import (
 	"io"
 
-	dbm "github.com/cometbft/cometbft-db"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/libs/log"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	servertypes "github.com/cosmos/cosmos-sdk/server/types"
 	"github.com/sunrise-zone/sunrise-app/app"
 	"github.com/sunrise-zone/sunrise-app/app/encoding"
+	dbm "github.com/tendermint/tm-db"
 )
 
 const (
@@ -44,7 +44,7 @@ func (a *App) PrepareProposalHandlerMap() map[string]PrepareProposalHandler {
 type App struct {
 	*app.App
 	maliciousStartHeight      int64
-	malPrepareProposalHandler PrepareProposalHandler
+	malPreparePropsoalHandler PrepareProposalHandler
 }
 
 func New(
@@ -52,12 +52,14 @@ func New(
 	db dbm.DB,
 	traceStore io.Writer,
 	loadLatest bool,
+	skipUpgradeHeights map[int64]bool,
+	homePath string,
 	invCheckPeriod uint,
 	encodingConfig encoding.Config,
 	appOpts servertypes.AppOptions,
 	baseAppOptions ...func(*baseapp.BaseApp),
 ) *App {
-	goodApp := app.New(logger, db, traceStore, loadLatest, invCheckPeriod, encodingConfig, 0, appOpts, baseAppOptions...)
+	goodApp := app.New(logger, db, traceStore, loadLatest, skipUpgradeHeights, homePath, invCheckPeriod, encodingConfig, appOpts, baseAppOptions...)
 	badApp := &App{App: goodApp}
 
 	// set the malicious prepare proposal handler if it is set in the app options
@@ -73,7 +75,7 @@ func (a *App) SetMaliciousBehavior(mcfg BehaviorConfig) {
 	if _, ok := a.PrepareProposalHandlerMap()[mcfg.HandlerName]; !ok {
 		panic("unknown malicious prepare proposal handler")
 	}
-	a.malPrepareProposalHandler = a.PrepareProposalHandlerMap()[mcfg.HandlerName]
+	a.malPreparePropsoalHandler = a.PrepareProposalHandlerMap()[mcfg.HandlerName]
 	a.maliciousStartHeight = mcfg.StartHeight
 }
 
@@ -81,7 +83,7 @@ func (a *App) SetMaliciousBehavior(mcfg BehaviorConfig) {
 // malicious behavior after a given height.
 func (a *App) PrepareProposal(req abci.RequestPrepareProposal) abci.ResponsePrepareProposal {
 	if a.LastBlockHeight()+1 >= a.maliciousStartHeight {
-		return a.malPrepareProposalHandler(req)
+		return a.malPreparePropsoalHandler(req)
 	}
 	return a.App.PrepareProposal(req)
 }

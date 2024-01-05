@@ -5,16 +5,7 @@ import (
 	"testing"
 	"time"
 
-	blobstream "github.com/sunrise-zone/sunrise-app/x/blobstream/module"
-
-	"github.com/sunrise-zone/sunrise-app/app"
-	"github.com/sunrise-zone/sunrise-app/x/blobstream/keeper"
-	bstypes "github.com/sunrise-zone/sunrise-app/x/blobstream/types"
-
-	sdkmath "cosmossdk.io/math"
-	"cosmossdk.io/store"
-	storetypes "cosmossdk.io/store/types"
-	dbm "github.com/cometbft/cometbft-db"
+	cosmosmath "cosmossdk.io/math"
 	"github.com/cometbft/cometbft/libs/log"
 	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	tmversion "github.com/cometbft/cometbft/proto/tendermint/version"
@@ -25,8 +16,9 @@ import (
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	ccrypto "github.com/cosmos/cosmos-sdk/crypto/types"
 	"github.com/cosmos/cosmos-sdk/std"
+	"github.com/cosmos/cosmos-sdk/store"
+	storetypes "github.com/cosmos/cosmos-sdk/store/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkmodule "github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
@@ -46,6 +38,11 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	gethcommon "github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
+	"github.com/sunrise-zone/sunrise-app/app"
+	"github.com/sunrise-zone/sunrise-app/x/qgb"
+	"github.com/sunrise-zone/sunrise-app/x/qgb/keeper"
+	qgbtypes "github.com/sunrise-zone/sunrise-app/x/qgb/types"
+	dbm "github.com/tendermint/tm-db"
 )
 
 var (
@@ -58,7 +55,7 @@ var (
 		MaxEntries:        10,
 		HistoricalEntries: 10000,
 		BondDenom:         "stake",
-		MinCommissionRate: sdkmath.LegacyNewDecWithPrec(0, 0),
+		MinCommissionRate: sdk.NewDecWithPrec(0, 0),
 	}
 
 	// ConsPrivKeys generate ed25519 ConsPrivKeys to be used for validator operator keys
@@ -137,37 +134,37 @@ func initEVMAddrs(count int) []gethcommon.Address {
 	return addresses
 }
 
-// TestInput stores the various keepers required to test Blobstream
+// TestInput stores the various keepers required to test the QGB
 type TestInput struct {
-	BlobstreamKeeper keeper.Keeper
-	AccountKeeper    authkeeper.AccountKeeper
-	StakingKeeper    stakingkeeper.Keeper
-	SlashingKeeper   slashingkeeper.Keeper
-	DistKeeper       distrkeeper.Keeper
-	BankKeeper       bankkeeper.BaseKeeper
-	Context          sdk.Context
-	Marshaler        codec.Codec
-	LegacyAmino      *codec.LegacyAmino
+	QgbKeeper      keeper.Keeper
+	AccountKeeper  authkeeper.AccountKeeper
+	StakingKeeper  stakingkeeper.Keeper
+	SlashingKeeper slashingkeeper.Keeper
+	DistKeeper     distrkeeper.Keeper
+	BankKeeper     bankkeeper.BaseKeeper
+	Context        sdk.Context
+	Marshaler      codec.Codec
+	LegacyAmino    *codec.LegacyAmino
 }
 
-// CreateTestEnvWithoutBlobstreamKeysInit creates the keeper testing environment for Blobstream
-func CreateTestEnvWithoutBlobstreamKeysInit(t *testing.T) TestInput {
+// CreateTestEnvWithoutQGBKeysInit creates the keeper testing environment for the QGB
+func CreateTestEnvWithoutQGBKeysInit(t *testing.T) TestInput {
 	t.Helper()
 
 	// Initialize store keys
-	bsKey := storetypes.NewKVStoreKey(bstypes.StoreKey)
-	keyAcc := storetypes.NewKVStoreKey(authtypes.StoreKey)
-	keyStaking := storetypes.NewKVStoreKey(stakingtypes.StoreKey)
-	keyBank := storetypes.NewKVStoreKey(banktypes.StoreKey)
-	keyDistro := storetypes.NewKVStoreKey(distrtypes.StoreKey)
-	keyParams := storetypes.NewKVStoreKey(paramstypes.StoreKey)
-	tkeyParams := storetypes.NewTransientStoreKey(paramstypes.TStoreKey)
-	keySlashing := storetypes.NewKVStoreKey(slashingtypes.StoreKey)
+	qgbKey := sdk.NewKVStoreKey(qgbtypes.StoreKey)
+	keyAcc := sdk.NewKVStoreKey(authtypes.StoreKey)
+	keyStaking := sdk.NewKVStoreKey(stakingtypes.StoreKey)
+	keyBank := sdk.NewKVStoreKey(banktypes.StoreKey)
+	keyDistro := sdk.NewKVStoreKey(distrtypes.StoreKey)
+	keyParams := sdk.NewKVStoreKey(paramstypes.StoreKey)
+	tkeyParams := sdk.NewTransientStoreKey(paramstypes.TStoreKey)
+	keySlashing := sdk.NewKVStoreKey(slashingtypes.StoreKey)
 
 	// Initialize memory database and mount stores on it
 	db := dbm.NewMemDB()
 	ms := store.NewCommitMultiStore(db)
-	ms.MountStoreWithDB(bsKey, storetypes.StoreTypeIAVL, db)
+	ms.MountStoreWithDB(qgbKey, storetypes.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyAcc, storetypes.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyParams, storetypes.StoreTypeIAVL, db)
 	ms.MountStoreWithDB(keyStaking, storetypes.StoreTypeIAVL, db)
@@ -213,7 +210,7 @@ func CreateTestEnvWithoutBlobstreamKeysInit(t *testing.T) TestInput {
 	paramsKeeper.Subspace(banktypes.ModuleName)
 	paramsKeeper.Subspace(stakingtypes.ModuleName)
 	paramsKeeper.Subspace(distrtypes.ModuleName)
-	paramsKeeper.Subspace(bstypes.DefaultParamspace)
+	paramsKeeper.Subspace(qgbtypes.DefaultParamspace)
 	paramsKeeper.Subspace(slashingtypes.ModuleName)
 
 	// this is also used to initialize module accounts for all the map keys
@@ -222,7 +219,7 @@ func CreateTestEnvWithoutBlobstreamKeysInit(t *testing.T) TestInput {
 		distrtypes.ModuleName:          nil,
 		stakingtypes.BondedPoolName:    {authtypes.Burner, authtypes.Staking},
 		stakingtypes.NotBondedPoolName: {authtypes.Burner, authtypes.Staking},
-		bstypes.ModuleName:             {authtypes.Minter, authtypes.Burner},
+		qgbtypes.ModuleName:            {authtypes.Minter, authtypes.Burner},
 	}
 
 	accountKeeper := authkeeper.NewAccountKeeper(
@@ -269,16 +266,16 @@ func CreateTestEnvWithoutBlobstreamKeysInit(t *testing.T) TestInput {
 	for name, perms := range maccPerms {
 		mod := authtypes.NewEmptyModuleAccount(name, perms...)
 		if name == stakingtypes.NotBondedPoolName {
-			err = bankKeeper.MintCoins(ctx, bstypes.ModuleName, totalSupply)
+			err = bankKeeper.MintCoins(ctx, qgbtypes.ModuleName, totalSupply)
 			require.NoError(t, err)
-			err = bankKeeper.SendCoinsFromModuleToModule(ctx, bstypes.ModuleName, mod.Name, totalSupply)
+			err = bankKeeper.SendCoinsFromModuleToModule(ctx, qgbtypes.ModuleName, mod.Name, totalSupply)
 			require.NoError(t, err)
 		} else if name == distrtypes.ModuleName {
 			// some big pot to pay out
 			amt := sdk.NewCoins(sdk.NewInt64Coin("stake", 500000))
-			err = bankKeeper.MintCoins(ctx, bstypes.ModuleName, amt)
+			err = bankKeeper.MintCoins(ctx, qgbtypes.ModuleName, amt)
 			require.NoError(t, err)
-			err = bankKeeper.SendCoinsFromModuleToModule(ctx, bstypes.ModuleName, mod.Name, amt)
+			err = bankKeeper.SendCoinsFromModuleToModule(ctx, qgbtypes.ModuleName, mod.Name, amt)
 			require.NoError(t, err)
 		}
 		accountKeeper.SetModuleAccount(ctx, mod)
@@ -295,9 +292,9 @@ func CreateTestEnvWithoutBlobstreamKeysInit(t *testing.T) TestInput {
 		getSubspace(paramsKeeper, slashingtypes.ModuleName).WithKeyTable(slashingtypes.ParamKeyTable()),
 	)
 
-	k := keeper.NewKeeper(marshaler, bsKey, getSubspace(paramsKeeper, bstypes.DefaultParamspace), &stakingKeeper)
-	testBlobstreamParams := bstypes.DefaultGenesis().Params
-	k.SetParams(ctx, testBlobstreamParams)
+	k := keeper.NewKeeper(marshaler, qgbKey, getSubspace(paramsKeeper, qgbtypes.DefaultParamspace), &stakingKeeper)
+	testQGBParams := qgbtypes.DefaultGenesis().Params
+	k.SetParams(ctx, *testQGBParams)
 
 	stakingKeeper = *stakingKeeper.SetHooks(
 		stakingtypes.NewMultiStakingHooks(
@@ -307,23 +304,23 @@ func CreateTestEnvWithoutBlobstreamKeysInit(t *testing.T) TestInput {
 		),
 	)
 	return TestInput{
-		BlobstreamKeeper: k,
-		AccountKeeper:    accountKeeper,
-		BankKeeper:       bankKeeper,
-		StakingKeeper:    *stakingKeeper,
-		SlashingKeeper:   slashingKeeper,
-		DistKeeper:       distKeeper,
-		Context:          ctx,
-		Marshaler:        marshaler,
-		LegacyAmino:      cdc,
+		QgbKeeper:      *k,
+		AccountKeeper:  accountKeeper,
+		BankKeeper:     bankKeeper,
+		StakingKeeper:  stakingKeeper,
+		SlashingKeeper: slashingKeeper,
+		DistKeeper:     distKeeper,
+		Context:        ctx,
+		Marshaler:      marshaler,
+		LegacyAmino:    cdc,
 	}
 }
 
-// CreateTestEnv creates the keeper testing environment for Blobstream
+// CreateTestEnv creates the keeper testing environment for QGB
 func CreateTestEnv(t *testing.T) TestInput {
-	input := CreateTestEnvWithoutBlobstreamKeysInit(t)
-	input.BlobstreamKeeper.SetLatestAttestationNonce(input.Context, blobstream.InitialLatestAttestationNonce)
-	input.BlobstreamKeeper.SetEarliestAvailableAttestationNonce(input.Context, blobstream.InitialEarliestAvailableAttestationNonce)
+	input := CreateTestEnvWithoutQGBKeysInit(t)
+	input.QgbKeeper.SetLatestAttestationNonce(input.Context, qgb.InitialLatestAttestationNonce)
+	input.QgbKeeper.SetEarliestAvailableAttestationNonce(input.Context, qgb.InitialEarliestAvailableAttestationNonce)
 	return input
 }
 
@@ -337,6 +334,7 @@ func MakeTestCodec() *codec.LegacyAmino {
 	sdk.RegisterLegacyAminoCodec(cdc)
 	ccodec.RegisterCrypto(cdc)
 	params.AppModuleBasic{}.RegisterLegacyAminoCodec(cdc)
+	qgbtypes.RegisterLegacyAminoCodec(cdc)
 	return cdc
 }
 
@@ -351,7 +349,7 @@ func MakeTestMarshaler() codec.Codec {
 	interfaceRegistry := codectypes.NewInterfaceRegistry()
 	std.RegisterInterfaces(interfaceRegistry)
 	ModuleBasics.RegisterInterfaces(interfaceRegistry)
-	bstypes.RegisterInterfaces(interfaceRegistry)
+	qgbtypes.RegisterInterfaces(interfaceRegistry)
 	return codec.NewProtoCodec(interfaceRegistry)
 }
 
@@ -370,7 +368,7 @@ func SetupFiveValChain(t *testing.T) (TestInput, sdk.Context) {
 	}
 
 	// Run the staking endblocker to ensure valset is correct in state
-	input.StakingKeeper.EndBlocker(input.Context)
+	staking.EndBlocker(input.Context, input.StakingKeeper)
 
 	// Return the test input
 	return input, input.Context
@@ -384,7 +382,7 @@ func CreateValidator(
 	accountNumber uint64,
 	valAddr sdk.ValAddress,
 	consPubKey ccrypto.PubKey,
-	stakingAmount sdkmath.Int,
+	stakingAmount cosmosmath.Int,
 ) {
 	// Initialize the account for the key
 	acc := input.AccountKeeper.NewAccount(
@@ -393,8 +391,8 @@ func CreateValidator(
 	)
 
 	// Set the balance for the account
-	require.NoError(t, input.BankKeeper.MintCoins(input.Context, bstypes.ModuleName, InitCoins))
-	err := input.BankKeeper.SendCoinsFromModuleToAccount(input.Context, bstypes.ModuleName, acc.GetAddress(), InitCoins)
+	require.NoError(t, input.BankKeeper.MintCoins(input.Context, qgbtypes.ModuleName, InitCoins))
+	err := input.BankKeeper.SendCoinsFromModuleToAccount(input.Context, qgbtypes.ModuleName, acc.GetAddress(), InitCoins)
 	require.NoError(t, err)
 
 	// Set the account in state
@@ -402,7 +400,7 @@ func CreateValidator(
 
 	// Create a validator for that account using some tokens in the account
 	// and the staking handler
-	msgServer := stakingkeeper.NewMsgServerImpl(&input.StakingKeeper)
+	msgServer := stakingkeeper.NewMsgServerImpl(input.StakingKeeper)
 	_, err = msgServer.CreateValidator(input.Context, NewTestMsgCreateValidator(valAddr, consPubKey, stakingAmount))
 	require.NoError(t, err)
 }
@@ -413,18 +411,18 @@ func RegisterEVMAddress(
 	valAddr sdk.ValAddress,
 	evmAddr gethcommon.Address,
 ) {
-	bsMsgServer := keeper.NewMsgServerImpl(input.BlobstreamKeeper)
-	registerMsg := bstypes.NewMsgRegisterEvmAddress(valAddr, evmAddr)
-	_, err := bsMsgServer.RegisterEvmAddress(input.Context, registerMsg)
+	qgbMsgServer := keeper.NewMsgServerImpl(input.QgbKeeper)
+	registerMsg := qgbtypes.NewMsgRegisterEVMAddress(valAddr, evmAddr)
+	_, err := qgbMsgServer.RegisterEVMAddress(input.Context, registerMsg)
 	require.NoError(t, err)
 }
 
 func NewTestMsgCreateValidator(
 	address sdk.ValAddress,
 	pubKey ccrypto.PubKey,
-	amt sdkmath.Int,
+	amt cosmosmath.Int,
 ) *stakingtypes.MsgCreateValidator {
-	commission := stakingtypes.NewCommissionRates(sdkmath.LegacyZeroDec(), sdkmath.LegacyZeroDec(), sdkmath.LegacyZeroDec())
+	commission := stakingtypes.NewCommissionRates(sdk.ZeroDec(), sdk.ZeroDec(), sdk.ZeroDec())
 	out, err := stakingtypes.NewMsgCreateValidator(
 		address, pubKey, sdk.NewCoin("stake", amt),
 		stakingtypes.Description{
@@ -433,7 +431,7 @@ func NewTestMsgCreateValidator(
 			Website:         "",
 			SecurityContact: "",
 			Details:         "",
-		}, commission, sdkmath.OneInt(),
+		}, commission, sdk.OneInt(),
 	)
 	if err != nil {
 		panic(err)
@@ -451,8 +449,8 @@ func SetupTestChain(t *testing.T, weights []uint64) (TestInput, sdk.Context) {
 	input.StakingKeeper.SetParams(input.Context, TestingStakeParams)
 
 	// Initialize each of the validators
-	stakingMsgServer := stakingkeeper.NewMsgServerImpl(&input.StakingKeeper)
-	bsMsgServer := keeper.NewMsgServerImpl(input.BlobstreamKeeper)
+	stakingMsgServer := stakingkeeper.NewMsgServerImpl(input.StakingKeeper)
+	qgbMsgServer := keeper.NewMsgServerImpl(input.QgbKeeper)
 	for i, weight := range weights {
 		consPrivKey := ed25519.GenPrivKey()
 		consPubKey := consPrivKey.PubKey()
@@ -469,8 +467,8 @@ func SetupTestChain(t *testing.T, weights []uint64) (TestInput, sdk.Context) {
 
 		// Set the balance for the account
 		weightCoins := sdk.NewCoins(sdk.NewInt64Coin(TestingStakeParams.BondDenom, int64(weight)))
-		require.NoError(t, input.BankKeeper.MintCoins(input.Context, bstypes.ModuleName, weightCoins))
-		require.NoError(t, input.BankKeeper.SendCoinsFromModuleToAccount(input.Context, bstypes.ModuleName, accAddr, weightCoins))
+		require.NoError(t, input.BankKeeper.MintCoins(input.Context, qgbtypes.ModuleName, weightCoins))
+		require.NoError(t, input.BankKeeper.SendCoinsFromModuleToAccount(input.Context, qgbtypes.ModuleName, accAddr, weightCoins))
 
 		// Set the account in state
 		input.AccountKeeper.SetAccount(input.Context, acc)
@@ -479,16 +477,16 @@ func SetupTestChain(t *testing.T, weights []uint64) (TestInput, sdk.Context) {
 		// and the staking handler
 		_, err := stakingMsgServer.CreateValidator(
 			input.Context,
-			NewTestMsgCreateValidator(valAddr, consPubKey, sdkmath.NewIntFromUint64(weight)),
+			NewTestMsgCreateValidator(valAddr, consPubKey, sdk.NewIntFromUint64(weight)),
 		)
 		require.NoError(t, err)
 
-		registerMsg := bstypes.NewMsgRegisterEvmAddress(valAddr, EVMAddrs[i])
-		_, err = bsMsgServer.RegisterEvmAddress(input.Context, registerMsg)
+		registerMsg := qgbtypes.NewMsgRegisterEVMAddress(valAddr, EVMAddrs[i])
+		_, err = qgbMsgServer.RegisterEVMAddress(input.Context, registerMsg)
 		require.NoError(t, err)
 
 		// Run the staking endblocker to ensure valset is correct in state
-		input.StakingKeeper.EndBlocker(input.Context)
+		staking.EndBlocker(input.Context, input.StakingKeeper)
 	}
 
 	// some inputs can cause the validator creation not to work, this checks that
@@ -500,30 +498,30 @@ func SetupTestChain(t *testing.T, weights []uint64) (TestInput, sdk.Context) {
 	return input, input.Context
 }
 
-func NewTestMsgUnDelegateValidator(address sdk.ValAddress, amt sdkmath.Int) *stakingtypes.MsgUndelegate {
+func NewTestMsgUnDelegateValidator(address sdk.ValAddress, amt cosmosmath.Int) *stakingtypes.MsgUndelegate {
 	msg := stakingtypes.NewMsgUndelegate(sdk.AccAddress(address), address, sdk.NewCoin("stake", amt))
 	return msg
 }
 
-// ExecuteBlobstreamHeights executes the end exclusive range of heights specified by beginHeight and endHeight
-// along with the Blobstream abci.EndBlocker on each one of them.
+// ExecuteQGBHeights executes the end exclusive range of heights specified by beginHeight and endHeight
+// along with the QGB abci.EndBlocker on each one of them.
 // Returns the updated context with block height advanced to endHeight.
-func ExecuteBlobstreamHeights(ctx sdk.Context, bsKeeper keeper.Keeper, beginHeight int64, endHeight int64) sdk.Context {
+func ExecuteQGBHeights(ctx sdk.Context, qgbKeeper keeper.Keeper, beginHeight int64, endHeight int64) sdk.Context {
 	for i := beginHeight; i < endHeight; i++ {
 		ctx = ctx.WithBlockHeight(i)
-		blobstream.EndBlocker(ctx, bsKeeper)
+		qgb.EndBlocker(ctx, qgbKeeper)
 	}
 	return ctx
 }
 
-// ExecuteBlobstreamHeightsWithTime executes the end exclusive range of heights specified by beginHeight and endHeight
-// along with the Blobstream abci.EndBlocker on each one of them.
+// ExecuteQGBHeightsWithTime executes the end exclusive range of heights specified by beginHeight and endHeight
+// along with the QGB abci.EndBlocker on each one of them.
 // Uses the interval to calculate the block header time.
-func ExecuteBlobstreamHeightsWithTime(ctx sdk.Context, bsKeeper keeper.Keeper, beginHeight int64, endHeight int64, blockInterval time.Duration) sdk.Context {
+func ExecuteQGBHeightsWithTime(ctx sdk.Context, qgbKeeper keeper.Keeper, beginHeight int64, endHeight int64, blockInterval time.Duration) sdk.Context {
 	blockTime := ctx.BlockTime()
 	for i := beginHeight; i < endHeight; i++ {
 		ctx = ctx.WithBlockHeight(i).WithBlockTime(blockTime)
-		blobstream.EndBlocker(ctx, bsKeeper)
+		qgb.EndBlocker(ctx, qgbKeeper)
 		blockTime = blockTime.Add(blockInterval)
 	}
 	return ctx

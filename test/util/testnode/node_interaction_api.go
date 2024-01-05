@@ -7,25 +7,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sunrise-zone/sunrise-app/app/encoding"
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
-	"github.com/sunrise-zone/sunrise-app/pkg/shares"
-	"github.com/sunrise-zone/sunrise-app/pkg/user"
-	"github.com/sunrise-zone/sunrise-app/test/util"
-	"github.com/sunrise-zone/sunrise-app/test/util/blobfactory"
-	"github.com/sunrise-zone/sunrise-app/x/blob/types"
-
 	abci "github.com/cometbft/cometbft/abci/types"
 	tmconfig "github.com/cometbft/cometbft/config"
 	tmrand "github.com/cometbft/cometbft/libs/rand"
 	rpctypes "github.com/cometbft/cometbft/rpc/core/types"
+	coretypes "github.com/cometbft/cometbft/types"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	"github.com/sunrise-zone/sunrise-app/app"
+	"github.com/sunrise-zone/sunrise-app/app/encoding"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
+	"github.com/sunrise-zone/sunrise-app/pkg/shares"
+	"github.com/sunrise-zone/sunrise-app/x/blob/types"
 )
 
 const (
@@ -38,13 +35,14 @@ type Context struct {
 }
 
 func NewContext(goCtx context.Context, kr keyring.Keyring, tmCfg *tmconfig.Config, chainID string) Context {
-	ecfg := encoding.MakeConfig(util.ModuleBasics)
+	ecfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
 	cctx := client.Context{}.
 		WithKeyring(kr).
 		WithHomeDir(tmCfg.RootDir).
 		WithChainID(chainID).
 		WithInterfaceRegistry(ecfg.InterfaceRegistry).
 		WithCodec(ecfg.Codec).
+		WithLegacyAmino(ecfg.Amino).
 		WithTxConfig(ecfg.TxConfig).
 		WithAccountRetriever(authtypes.AccountRetriever{})
 
@@ -216,11 +214,14 @@ func (c *Context) WaitForTx(hashHexStr string, blocks int) (*rpctypes.ResultTx, 
 // blobData. This function blocks until the PFB has been included in a block and
 // returns an error if the transaction is invalid or is rejected by the mempool.
 func (c *Context) PostData(account, broadcastMode string, ns appns.Namespace, blobData []byte) (*sdk.TxResponse, error) {
-	rec, err := c.Keyring.Key(account)
-	if err != nil {
-		return nil, err
+	opts := []types.TxBuilderOption{
+		types.SetGasLimit(100000000000000),
 	}
 
+	// use the key for accounts[i] to create a singer used for a single PFB
+	signer := types.NewKeyringSigner(c.Keyring, account, c.ChainID)
+
+	rec := signer.GetSignerInfo()
 	addr, err := rec.GetAddress()
 	if err != nil {
 		return nil, err
@@ -231,33 +232,46 @@ func (c *Context) PostData(account, broadcastMode string, ns appns.Namespace, bl
 		return nil, err
 	}
 
-	// use the key for accounts[i] to create a singer used for a single PFB
-	signer, err := user.NewSigner(c.Keyring, c.GRPCClient, addr, c.TxConfig, c.ChainID, acc, seq)
+	signer.SetAccountNumber(acc)
+	signer.SetSequence(seq)
+
+	blob, err := types.NewBlob(ns, blobData, appconsts.ShareVersionZero)
 	if err != nil {
 		return nil, err
 	}
 
-	b, err := types.NewBlob(ns, blobData, appconsts.ShareVersionZero)
+	msg, err := types.NewMsgPayForBlobs(
+		addr.String(),
+		blob,
+	)
 	if err != nil {
 		return nil, err
 	}
 
-	gas := types.DefaultEstimateGas([]uint32{uint32(len(blobData))})
-	opts := blobfactory.FeeTxOpts(gas)
-
-	blobTx, err := signer.CreatePayForBlob([]*blob.Blob{b}, opts...)
+	builder := signer.NewTxBuilder(opts...)
+	stx, err := signer.BuildSignedTx(builder, msg)
 	if err != nil {
 		return nil, err
 	}
 
-	// TODO: the signer is also capable of submitting the transaction via gRPC
-	// so this section could eventually be replaced
+	rawTx, err := signer.EncodeTx(stx)
+	if err != nil {
+		return nil, err
+	}
+
+	blobTx, err := coretypes.MarshalBlobTx(rawTx, blob)
+	if err != nil {
+		return nil, err
+	}
+
 	var res *sdk.TxResponse
 	switch broadcastMode {
 	case flags.BroadcastSync:
 		res, err = c.BroadcastTxSync(blobTx)
 	case flags.BroadcastAsync:
 		res, err = c.BroadcastTxAsync(blobTx)
+	case flags.BroadcastBlock:
+		res, err = c.BroadcastTxCommit(blobTx)
 	default:
 		return nil, fmt.Errorf("unsupported broadcast mode %s; supported modes: sync, async, block", c.BroadcastMode)
 	}
@@ -275,13 +289,13 @@ func (c *Context) PostData(account, broadcastMode string, ns appns.Namespace, bl
 // create a square of the desired size. broadcast mode indicates if the tx
 // should be submitted async, sync, or block. (see flags.BroadcastModeSync). If
 // broadcast mode is the string zero value, then it will be set to block.
-func (c *Context) FillBlock(squareSize int, account string, broadcastMode string) (*sdk.TxResponse, error) {
+func (c *Context) FillBlock(squareSize int, accounts []string, broadcastMode string) (*sdk.TxResponse, error) {
 	if squareSize < appconsts.MinSquareSize+1 || (squareSize&(squareSize-1) != 0) {
 		return nil, fmt.Errorf("unsupported squareSize: %d", squareSize)
 	}
 
 	if broadcastMode == "" {
-		broadcastMode = flags.BroadcastSync
+		broadcastMode = flags.BroadcastBlock
 	}
 
 	// create the tx the size of the square minus one row
@@ -289,7 +303,7 @@ func (c *Context) FillBlock(squareSize int, account string, broadcastMode string
 
 	// we use a formula to guarantee that the tx is the exact size needed to force a specific square size.
 	blobSize := shares.AvailableBytesFromSparseShares(shareCount)
-	return c.PostData(account, broadcastMode, appns.RandomBlobNamespace(), tmrand.Bytes(blobSize))
+	return c.PostData(accounts[0], broadcastMode, appns.RandomBlobNamespace(), tmrand.Bytes(blobSize))
 }
 
 // HeightForTimestamp returns the block height for the first block after a

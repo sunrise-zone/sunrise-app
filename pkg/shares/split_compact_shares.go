@@ -4,10 +4,9 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	coretypes "github.com/cometbft/cometbft/types"
 	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
 	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
-
-	coretypes "github.com/cometbft/cometbft/types"
 )
 
 // CompactShareSplitter will write raw data compactly across a progressively
@@ -30,7 +29,7 @@ type CompactShareSplitter struct {
 // NewCompactShareSplitter returns a CompactShareSplitter using the provided
 // namespace and shareVersion.
 func NewCompactShareSplitter(ns appns.Namespace, shareVersion uint8) *CompactShareSplitter {
-	sb, err := NewBuilder(ns, shareVersion, true)
+	sb, err := NewBuilder(ns, shareVersion, true).Init()
 	if err != nil {
 		panic(err)
 	}
@@ -106,7 +105,7 @@ func (css *CompactShareSplitter) stackPending() error {
 	css.shares = append(css.shares, *pendingShare)
 
 	// Now we need to create a new builder
-	css.shareBuilder, err = NewBuilder(css.namespace, css.shareVersion, false)
+	css.shareBuilder, err = NewBuilder(css.namespace, css.shareVersion, false).Init()
 	return err
 }
 
@@ -164,7 +163,7 @@ func (css *CompactShareSplitter) writeSequenceLen(sequenceLen uint32) error {
 	}
 
 	// We may find a more efficient way to write seqLen
-	b, err := NewBuilder(css.namespace, css.shareVersion, true)
+	b, err := NewBuilder(css.namespace, css.shareVersion, true).Init()
 	if err != nil {
 		return err
 	}

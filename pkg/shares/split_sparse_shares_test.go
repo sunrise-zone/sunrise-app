@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
-
+	coretypes "github.com/cometbft/cometbft/types"
 	"github.com/stretchr/testify/assert"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 )
 
 // TestSparseShareSplitter tests that the spare share splitter can split blobs
@@ -17,8 +16,18 @@ func TestSparseShareSplitter(t *testing.T) {
 	ns1 := appns.MustNewV0(bytes.Repeat([]byte{1}, appns.NamespaceVersionZeroIDSize))
 	ns2 := appns.MustNewV0(bytes.Repeat([]byte{2}, appns.NamespaceVersionZeroIDSize))
 
-	blob1 := blob.New(ns1, []byte("data1"), appconsts.ShareVersionZero)
-	blob2 := blob.New(ns2, []byte("data2"), appconsts.ShareVersionZero)
+	blob1 := coretypes.Blob{
+		NamespaceVersion: ns1.Version,
+		NamespaceID:      ns1.ID,
+		ShareVersion:     0,
+		Data:             []byte("data1"),
+	}
+	blob2 := coretypes.Blob{
+		NamespaceVersion: ns2.Version,
+		NamespaceID:      ns2.ID,
+		ShareVersion:     0,
+		Data:             []byte("data2"),
+	}
 	sss := NewSparseShareSplitter()
 
 	err := sss.Write(blob1)
@@ -57,6 +66,11 @@ func TestWriteNamespacePaddingShares(t *testing.T) {
 	assert.Equal(t, info.Version(), appconsts.ShareVersionZero)
 }
 
-func newBlob(ns appns.Namespace, shareVersion uint8) *blob.Blob {
-	return blob.New(ns, []byte("data"), shareVersion)
+func newBlob(ns appns.Namespace, shareVersion uint8) coretypes.Blob {
+	return coretypes.Blob{
+		NamespaceVersion: ns.Version,
+		NamespaceID:      ns.ID,
+		ShareVersion:     shareVersion,
+		Data:             []byte("data"),
+	}
 }

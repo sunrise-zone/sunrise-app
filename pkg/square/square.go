@@ -3,16 +3,15 @@ package square
 import (
 	"bytes"
 	"fmt"
+	"math"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	"github.com/sunrise-zone/sunrise-app/pkg/da"
-	"github.com/sunrise-zone/sunrise-app/pkg/namespace"
-	"github.com/sunrise-zone/sunrise-app/pkg/shares"
-	blobtypes "github.com/sunrise-zone/sunrise-app/x/blob/types"
-
+	coreproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	core "github.com/cometbft/cometbft/types"
 	"github.com/cosmos/cosmos-sdk/types"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+	"github.com/sunrise-zone/sunrise-app/pkg/namespace"
+	"github.com/sunrise-zone/sunrise-app/pkg/shares"
+	blob "github.com/sunrise-zone/sunrise-app/x/blob/types"
 )
 
 // Build takes an arbitrary long list of (prioritized) transactions and builds a square that is never
@@ -28,7 +27,7 @@ func Build(txs [][]byte, appVersion uint64, maxSquareSize int) (Square, [][]byte
 	normalTxs := make([][]byte, 0, len(txs))
 	blobTxs := make([][]byte, 0, len(txs))
 	for _, tx := range txs {
-		blobTx, isBlobTx := blob.UnmarshalBlobTx(tx)
+		blobTx, isBlobTx := core.UnmarshalBlobTx(tx)
 		if isBlobTx {
 			if builder.AppendBlobTx(blobTx) {
 				blobTxs = append(blobTxs, tx)
@@ -123,7 +122,7 @@ func Deconstruct(s Square, decoder types.TxDecoder) (core.Txs, error) {
 		if len(pfbMsgs) != 1 {
 			return nil, fmt.Errorf("expected PFB to have 1 message, but got %d", len(pfbMsgs))
 		}
-		pfb, isPfb := pfbMsgs[0].(*blobtypes.MsgPayForBlobs)
+		pfb, isPfb := pfbMsgs[0].(*blob.MsgPayForBlobs)
 		if !isPfb {
 			return nil, fmt.Errorf("expected PFB message, but got %T", pfbMsgs[0])
 		}
@@ -131,7 +130,7 @@ func Deconstruct(s Square, decoder types.TxDecoder) (core.Txs, error) {
 			return nil, fmt.Errorf("expected PFB to have %d blob sizes, but got %d", len(wpfb.ShareIndexes), len(pfb.BlobSizes))
 		}
 
-		blobs := make([]*blob.Blob, len(wpfb.ShareIndexes))
+		blobs := make([]*coreproto.Blob, len(wpfb.ShareIndexes))
 		for j, shareIndex := range wpfb.ShareIndexes {
 			end := int(shareIndex) + shares.SparseSharesNeeded(pfb.BlobSizes[j])
 			parsedBlobs, err := shares.ParseBlobs(s[shareIndex:end])
@@ -142,10 +141,15 @@ func Deconstruct(s Square, decoder types.TxDecoder) (core.Txs, error) {
 				return nil, fmt.Errorf("expected to parse a single blob, but got %d", len(blobs))
 			}
 
-			blobs[j] = parsedBlobs[0]
+			blobs[j] = &coreproto.Blob{
+				NamespaceId:      parsedBlobs[0].NamespaceID,
+				Data:             parsedBlobs[0].Data,
+				ShareVersion:     uint32(parsedBlobs[0].ShareVersion),
+				NamespaceVersion: uint32(parsedBlobs[0].NamespaceVersion),
+			}
 		}
 
-		tx, err := blob.MarshalBlobTx(wpfb.Tx, blobs...)
+		tx, err := core.MarshalBlobTx(wpfb.Tx, blobs...)
 		if err != nil {
 			return nil, err
 		}
@@ -196,12 +200,8 @@ func (s Square) Size() int {
 	return Size(len(s))
 }
 
-// Size returns the size of the row or column in shares of a square. This
-// function is currently a wrapper around the da packages equivalent function to
-// avoid breaking the api. In future versions there will not be a copy of this
-// code here.
 func Size(len int) int {
-	return da.SquareSize(len)
+	return shares.RoundUpPowerOfTwo(int(math.Ceil(math.Sqrt(float64(len)))))
 }
 
 // Equals returns true if two squares are equal
@@ -232,7 +232,7 @@ func (s Square) IsEmpty() bool {
 
 // EmptySquare returns a 1x1 square with a single tail padding share
 func EmptySquare() Square {
-	return da.EmptySquareShares()
+	return shares.TailPaddingShares(appconsts.MinShareCount)
 }
 
 func WriteSquare(

@@ -1,35 +1,30 @@
-package blobfactory_test
+package blobfactory
 
 import (
 	"testing"
 
-	"github.com/sunrise-zone/sunrise-app/app"
-	"github.com/sunrise-zone/sunrise-app/app/encoding"
-	"github.com/sunrise-zone/sunrise-app/test/util/blobfactory"
-	"github.com/sunrise-zone/sunrise-app/test/util/testnode"
-
 	tmrand "github.com/cometbft/cometbft/libs/rand"
 	"github.com/cometbft/cometbft/types"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/sunrise-zone/sunrise-app/app"
+	"github.com/sunrise-zone/sunrise-app/app/encoding"
+	apptypes "github.com/sunrise-zone/sunrise-app/x/blob/types"
 )
 
 // TestRandMultiBlobTxsSameSigner_Deterministic tests whether with the same random seed the RandMultiBlobTxsSameSigner function produces the same blob txs.
 func TestRandMultiBlobTxsSameSigner_Deterministic(t *testing.T) {
 	pfbCount := 10
-	signer, err := testnode.NewOfflineSigner()
-	require.NoError(t, err)
+	signer := apptypes.GenerateKeyringSigner(t)
 	encCfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
 	decoder := encCfg.TxConfig.TxDecoder()
 
 	rand1 := tmrand.NewRand()
 	rand1.Seed(1)
-	marshalledBlobTxs1 := blobfactory.RandMultiBlobTxsSameSigner(t, rand1, signer, pfbCount)
+	marshalledBlobTxs1 := RandMultiBlobTxsSameSigner(t, encCfg.TxConfig.TxEncoder(), rand1, signer, pfbCount)
 
-	signer.ForceSetSequence(0)
 	rand2 := tmrand.NewRand()
 	rand2.Seed(1)
-	marshalledBlobTxs2 := blobfactory.RandMultiBlobTxsSameSigner(t, rand2, signer, pfbCount)
+	marshalledBlobTxs2 := RandMultiBlobTxsSameSigner(t, encCfg.TxConfig.TxEncoder(), rand2, signer, pfbCount)
 
 	// additional checks for the sake of future debugging
 	for index := 0; index < pfbCount; index++ {

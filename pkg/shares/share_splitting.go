@@ -3,11 +3,9 @@ package shares
 import (
 	"errors"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
-
 	coretypes "github.com/cometbft/cometbft/types"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 	"golang.org/x/exp/maps"
 )
 
@@ -75,7 +73,7 @@ func SplitTxs(txs coretypes.Txs) (txShares []Share, pfbShares []Share, shareRang
 }
 
 // SplitBlobs splits the provided blobs into shares.
-func SplitBlobs(blobs ...*blob.Blob) ([]Share, error) {
+func SplitBlobs(blobs ...coretypes.Blob) ([]Share, error) {
 	writer := NewSparseShareSplitter()
 	for _, blob := range blobs {
 		if err := writer.Write(blob); err != nil {

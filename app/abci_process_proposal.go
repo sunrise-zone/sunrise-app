@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	coretypes "github.com/cometbft/cometbft/types"
 	"github.com/sunrise-zone/sunrise-app/app/ante"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
 	"github.com/sunrise-zone/sunrise-app/pkg/da"
 	"github.com/sunrise-zone/sunrise-app/pkg/shares"
 	"github.com/sunrise-zone/sunrise-app/pkg/square"
@@ -61,7 +61,7 @@ func (app *App) ProcessProposal(req *abci.RequestProcessProposal) (retResp *abci
 	// blobTxs have no PFBs present
 	for idx, rawTx := range req.Txs {
 		tx := rawTx
-		blobTx, isBlobTx := blob.UnmarshalBlobTx(rawTx)
+		blobTx, isBlobTx := coretypes.UnmarshalBlobTx(rawTx)
 		if isBlobTx {
 			tx = blobTx.Tx
 		}

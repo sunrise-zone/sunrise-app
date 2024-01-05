@@ -1,13 +1,16 @@
 package types
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"slices"
 
+	"github.com/celestiaorg/nmt"
+	"github.com/cometbft/cometbft/crypto/merkle"
+	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	coretypes "github.com/cometbft/cometbft/types"
 	auth "github.com/cosmos/cosmos-sdk/x/auth/types"
 	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	"github.com/sunrise-zone/sunrise-app/pkg/inclusion"
 	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 	appshares "github.com/sunrise-zone/sunrise-app/pkg/shares"
 
@@ -18,6 +21,8 @@ import (
 var _ sdk.Msg = &MsgPayForBlobs{}
 
 const (
+	ShareSize = appconsts.ShareSize
+
 	// PFBGasFixedCost is a rough estimate for the "fixed cost" in the gas cost
 	// formula: gas cost = gas per byte * bytes per share * shares occupied by
 	// blob + "fixed cost". In this context, "fixed cost" accounts for the gas
@@ -39,17 +44,17 @@ const (
 	BytesPerBlobInfo = 70
 )
 
-func NewMsgPayForBlobs(signer string, blobs ...*blob.Blob) (*MsgPayForBlobs, error) {
+func NewMsgPayForBlobs(signer string, blobs ...*Blob) (*MsgPayForBlobs, error) {
 	err := ValidateBlobs(blobs...)
 	if err != nil {
 		return nil, err
 	}
-	commitments, err := inclusion.CreateCommitments(blobs)
+	commitments, err := CreateCommitments(blobs)
 	if err != nil {
 		return nil, err
 	}
 
-	namespaceVersions, namespaceIds, sizes, shareVersions := ExtractBlobComponents(blobs)
+	namespaceVersions, namespaceIds, sizes, shareVersions := extractBlobComponents(blobs)
 	namespaces := []appns.Namespace{}
 	for i := range namespaceVersions {
 		namespace, err := appns.New(uint8(namespaceVersions[i]), namespaceIds[i])
@@ -177,8 +182,89 @@ func ValidateBlobNamespace(ns appns.Namespace) error {
 	return nil
 }
 
+// CreateCommitment generates the share commitment for a given blob.
+// See [data square layout rationale] and [blob share commitment rules].
+//
+// [data square layout rationale]: ../../specs/src/specs/data_square_layout.md
+// [blob share commitment rules]: ../../specs/src/specs/data_square_layout.md#blob-share-commitment-rules
+func CreateCommitment(blob *Blob) ([]byte, error) {
+	coreblob := coretypes.Blob{
+		NamespaceID:      blob.NamespaceId,
+		Data:             blob.Data,
+		ShareVersion:     uint8(blob.ShareVersion),
+		NamespaceVersion: uint8(blob.NamespaceVersion),
+	}
+
+	shares, err := appshares.SplitBlobs(coreblob)
+	if err != nil {
+		return nil, err
+	}
+
+	// the commitment is the root of a merkle mountain range with max tree size
+	// determined by the number of roots required to create a share commitment
+	// over that blob. The size of the tree is only increased if the number of
+	// subtree roots surpasses a constant threshold.
+	subTreeWidth := appshares.SubTreeWidth(len(shares), appconsts.DefaultSubtreeRootThreshold)
+	treeSizes, err := merkleMountainRangeSizes(uint64(len(shares)), uint64(subTreeWidth))
+	if err != nil {
+		return nil, err
+	}
+	leafSets := make([][][]byte, len(treeSizes))
+	cursor := uint64(0)
+	for i, treeSize := range treeSizes {
+		leafSets[i] = appshares.ToBytes(shares[cursor : cursor+treeSize])
+		cursor = cursor + treeSize
+	}
+
+	// create the commitments by pushing each leaf set onto an nmt
+	subTreeRoots := make([][]byte, len(leafSets))
+	for i, set := range leafSets {
+		// create the nmt todo(evan) use nmt wrapper
+		tree := nmt.New(sha256.New(), nmt.NamespaceIDSize(appns.NamespaceSize), nmt.IgnoreMaxNamespace(true))
+		for _, leaf := range set {
+			namespace, err := appns.New(uint8(blob.NamespaceVersion), blob.NamespaceId)
+			if err != nil {
+				return nil, err
+			}
+			// the namespace must be added again here even though it is already
+			// included in the leaf to ensure that the hash will match that of
+			// the nmt wrapper (pkg/wrapper). Each namespace is added to keep
+			// the namespace in the share, and therefore the parity data, while
+			// also allowing for the manual addition of the parity namespace to
+			// the parity data.
+			nsLeaf := make([]byte, 0)
+			nsLeaf = append(nsLeaf, namespace.Bytes()...)
+			nsLeaf = append(nsLeaf, leaf...)
+
+			err = tree.Push(nsLeaf)
+			if err != nil {
+				return nil, err
+			}
+		}
+		// add the root
+		root, err := tree.Root()
+		if err != nil {
+			return nil, err
+		}
+		subTreeRoots[i] = root
+	}
+	return merkle.HashFromByteSlices(subTreeRoots), nil
+}
+
+func CreateCommitments(blobs []*Blob) ([][]byte, error) {
+	commitments := make([][]byte, len(blobs))
+	for i, blob := range blobs {
+		commitment, err := CreateCommitment(blob)
+		if err != nil {
+			return nil, err
+		}
+		commitments[i] = commitment
+	}
+	return commitments, nil
+}
+
 // ValidateBlobs performs basic checks over the components of one or more PFBs.
-func ValidateBlobs(blobs ...*blob.Blob) error {
+func ValidateBlobs(blobs ...*Blob) error {
 	if len(blobs) == 0 {
 		return ErrNoBlobs
 	}
@@ -208,9 +294,9 @@ func ValidateBlobs(blobs ...*blob.Blob) error {
 	return nil
 }
 
-// ExtractBlobComponents separates and returns the components of a slice of
+// extractBlobComponents separates and returns the components of a slice of
 // blobs.
-func ExtractBlobComponents(pblobs []*blob.Blob) (namespaceVersions []uint32, namespaceIds [][]byte, sizes []uint32, shareVersions []uint32) {
+func extractBlobComponents(pblobs []*tmproto.Blob) (namespaceVersions []uint32, namespaceIds [][]byte, sizes []uint32, shareVersions []uint32) {
 	namespaceVersions = make([]uint32, len(pblobs))
 	namespaceIds = make([][]byte, len(pblobs))
 	sizes = make([]uint32, len(pblobs))
@@ -224,4 +310,32 @@ func ExtractBlobComponents(pblobs []*blob.Blob) (namespaceVersions []uint32, nam
 	}
 
 	return namespaceVersions, namespaceIds, sizes, shareVersions
+}
+
+// merkleMountainRangeSizes returns the sizes (number of leaf nodes) of the
+// trees in a merkle mountain range constructed for a given totalSize and
+// maxTreeSize.
+//
+// https://docs.grin.mw/wiki/chain-state/merkle-mountain-range/
+// https://github.com/opentimestamps/opentimestamps-server/blob/master/doc/merkle-mountain-range.md
+// TODO: potentially rename function because this doesn't return heights
+func merkleMountainRangeSizes(totalSize, maxTreeSize uint64) ([]uint64, error) {
+	var treeSizes []uint64
+
+	for totalSize != 0 {
+		switch {
+		case totalSize >= maxTreeSize:
+			treeSizes = append(treeSizes, maxTreeSize)
+			totalSize = totalSize - maxTreeSize
+		case totalSize < maxTreeSize:
+			treeSize, err := appshares.RoundDownPowerOfTwo(totalSize)
+			if err != nil {
+				return treeSizes, err
+			}
+			treeSizes = append(treeSizes, treeSize)
+			totalSize = totalSize - treeSize
+		}
+	}
+
+	return treeSizes, nil
 }

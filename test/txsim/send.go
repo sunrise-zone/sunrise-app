@@ -53,7 +53,7 @@ func (s *SendSequence) Init(_ context.Context, _ grpc.ClientConn, allocateAccoun
 	s.accounts = allocateAccounts(s.numAccounts, amount)
 }
 
-// Next submits a transaction to remove funds from one account to the next
+// Next sumbits a transaction to remove funds from one account to the next
 func (s *SendSequence) Next(_ context.Context, _ grpc.ClientConn, rand *rand.Rand) (Operation, error) {
 	if s.index >= s.numIterations {
 		return Operation{}, ErrEndOfSequence
@@ -62,7 +62,7 @@ func (s *SendSequence) Next(_ context.Context, _ grpc.ClientConn, rand *rand.Ran
 		Msgs: []types.Msg{
 			bank.NewMsgSend(s.accounts[s.index%s.numAccounts], s.accounts[(s.index+1)%s.numAccounts], types.NewCoins(types.NewInt64Coin(appconsts.BondDenom, int64(s.sendAmount)))),
 		},
-		Delay:    uint64(rand.Int63n(int64(s.maxHeightDelay))),
+		Delay:    rand.Int63n(int64(s.maxHeightDelay)),
 		GasLimit: SendGasLimit,
 	}
 	s.index++

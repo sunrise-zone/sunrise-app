@@ -12,8 +12,6 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/sunrise-zone/sunrise-app/app"
-	"github.com/sunrise-zone/sunrise-app/app/encoding"
 	"github.com/sunrise-zone/sunrise-app/test/txsim"
 	"github.com/sunrise-zone/sunrise-app/test/util/testnode"
 
@@ -28,7 +26,6 @@ func TestTxSimulator(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping TestTxSimulator in short mode.")
 	}
-	encCfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
 	testCases := []struct {
 		name        string
 		sequences   []txsim.Sequence
@@ -103,19 +100,15 @@ func TestTxSimulator(t *testing.T) {
 
 			keyring, rpcAddr, grpcAddr := Setup(t)
 
-			opts := txsim.DefaultOptions().
-				SuppressLogs().
-				WithPollTime(time.Millisecond * 100)
-			if tc.useFeegrant {
-				opts.UseFeeGrant()
-			}
-
 			err := txsim.Run(
 				ctx,
-				grpcAddr,
+				[]string{rpcAddr},
+				[]string{grpcAddr},
 				keyring,
-				encCfg,
-				opts,
+				"",
+				9001,
+				time.Second,
+				tc.useFeegrant,
 				tc.sequences...,
 			)
 			// Expect all sequences to run for at least 30 seconds without error
@@ -144,7 +137,7 @@ func TestTxSimulator(t *testing.T) {
 func Setup(t testing.TB) (keyring.Keyring, string, string) {
 	t.Helper()
 
-	cfg := testnode.DefaultConfig().WithTimeoutCommit(300 * time.Millisecond).WithFundedAccounts("txsim-master")
+	cfg := testnode.DefaultConfig()
 
 	cctx, rpcAddr, grpcAddr := testnode.NewNetwork(t, cfg)
 

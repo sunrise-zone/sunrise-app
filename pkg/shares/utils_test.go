@@ -4,9 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sunrise-zone/sunrise-app/test/util/testfactory"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/sunrise-zone/sunrise-app/test/util/testfactory"
 )
 
 func Test_zeroPadIfNecessary(t *testing.T) {

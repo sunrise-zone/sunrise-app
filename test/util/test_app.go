@@ -5,19 +5,18 @@ import (
 	"fmt"
 	"time"
 
-	"cosmossdk.io/simapp"
-	dbm "github.com/cometbft/cometbft-db"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/libs/log"
 	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	tmversion "github.com/cometbft/cometbft/proto/tendermint/version"
 	tmtypes "github.com/cometbft/cometbft/types"
+	"github.com/cosmos/cosmos-sdk/client/flags"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	"github.com/cosmos/cosmos-sdk/server"
+	"github.com/cosmos/cosmos-sdk/simapp"
 	"github.com/cosmos/cosmos-sdk/testutil/mock"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
@@ -27,22 +26,24 @@ import (
 	"github.com/sunrise-zone/sunrise-app/app/encoding"
 	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
 	"github.com/sunrise-zone/sunrise-app/test/util/testfactory"
-	"github.com/sunrise-zone/sunrise-app/test/util/testnode"
+	dbm "github.com/tendermint/tm-db"
 
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
-const ChainID = testfactory.ChainID
+const (
+	ChainID = "testapp"
+)
 
 // Get flags every time the simulator is run
 func init() {
 	simapp.GetSimulatorFlags()
 }
 
-type EmptyAppOptions struct{}
+type emptyAppOptions struct{}
 
 // Get implements AppOptions
-func (ao EmptyAppOptions) Get(_ string) interface{} {
+func (ao emptyAppOptions) Get(_ string) interface{} {
 	return nil
 }
 
@@ -53,19 +54,21 @@ func (ao EmptyAppOptions) Get(_ string) interface{} {
 func SetupTestAppWithGenesisValSet(cparams *tmproto.ConsensusParams, genAccounts ...string) (*app.App, keyring.Keyring) {
 	// var cache sdk.MultiStorePersistentCache
 	// EmptyAppOptions is a stub implementing AppOptions
-	emptyOpts := EmptyAppOptions{}
+	emptyOpts := emptyAppOptions{}
 	// var anteOpt = func(bapp *baseapp.BaseApp) { bapp.SetAnteHandler(nil) }
 	db := dbm.NewMemDB()
+	skipUpgradeHeights := make(map[int64]bool)
 
 	encCfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
 
 	testApp := app.New(
-		log.NewNopLogger(), db, nil, true,
+		log.NewNopLogger(), db, nil, true, skipUpgradeHeights,
+		cast.ToString(emptyOpts.Get(flags.FlagHome)),
 		cast.ToUint(emptyOpts.Get(server.FlagInvCheckPeriod)),
 		encCfg,
-		0,
 		emptyOpts,
 	)
+	testApp.GetBaseApp().SetProtocolVersion(appconsts.LatestVersion)
 
 	genesisState, valSet, kr := GenesisStateWithSingleValidator(testApp, genAccounts...)
 
@@ -83,7 +86,6 @@ func SetupTestAppWithGenesisValSet(cparams *tmproto.ConsensusParams, genAccounts
 		},
 		Evidence:  &cparams.Evidence,
 		Validator: &cparams.Validator,
-		Version:   &cparams.Version,
 	}
 
 	genesisTime := time.Date(2023, 1, 1, 1, 1, 1, 1, time.UTC).UTC()
@@ -102,23 +104,19 @@ func SetupTestAppWithGenesisValSet(cparams *tmproto.ConsensusParams, genAccounts
 	// commit genesis changes
 	testApp.Commit()
 	testApp.BeginBlock(abci.RequestBeginBlock{Header: tmproto.Header{
-		ChainID:            ChainID,
 		Height:             testApp.LastBlockHeight() + 1,
 		AppHash:            testApp.LastCommitID().Hash,
 		ValidatorsHash:     valSet.Hash(),
 		NextValidatorsHash: valSet.Hash(),
-		Version: tmversion.Consensus{
-			App: cparams.Version.AppVersion,
-		},
 	}})
 
 	return testApp, kr
 }
 
-// AddAccount mimics the cli addAccount command, providing an
+// AddGenesisAccount mimics the cli addGenesisAccount command, providing an
 // account with an allocation of to "token" and "tia" tokens in the genesis
 // state
-func AddAccount(addr sdk.AccAddress, appState app.GenesisState, cdc codec.Codec) (map[string]json.RawMessage, error) {
+func AddGenesisAccount(addr sdk.AccAddress, appState app.GenesisState, cdc codec.Codec) (map[string]json.RawMessage, error) {
 	// create concrete account type based on input parameters
 	var genAccount authtypes.GenesisAccount
 
@@ -202,7 +200,7 @@ func GenesisStateWithSingleValidator(testApp *app.App, genAccounts ...string) (a
 		Coins:   sdk.NewCoins(sdk.NewCoin(app.BondDenom, sdk.NewInt(100000000000000))),
 	})
 
-	kr, fundedBankAccs, fundedAuthAccs := testnode.FundKeyringAccounts(genAccounts...)
+	kr, fundedBankAccs, fundedAuthAccs := testfactory.FundKeyringAccounts(genAccounts...)
 	accs = append(accs, fundedAuthAccs...)
 	balances = append(balances, fundedBankAccs...)
 

@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	abci "github.com/cometbft/cometbft/abci/types"
+	coretypes "github.com/cometbft/cometbft/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
 	blobtypes "github.com/sunrise-zone/sunrise-app/x/blob/types"
 )
 
@@ -15,7 +15,7 @@ import (
 func (app *App) CheckTx(req *abci.RequestCheckTx) (*abci.ResponseCheckTx, error) {
 	tx := req.Tx
 	// check if the transaction contains blobs
-	btx, isBlob := blob.UnmarshalBlobTx(tx)
+	btx, isBlob := coretypes.UnmarshalBlobTx(tx)
 
 	if !isBlob {
 		// reject transactions that can't be decoded

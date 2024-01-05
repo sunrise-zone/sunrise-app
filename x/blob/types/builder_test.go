@@ -4,11 +4,12 @@ import (
 	"context"
 	"testing"
 
+	sdkmath "cosmossdk.io/math"
+	coretypes "github.com/cometbft/cometbft/types"
 	sdktypes "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
 	"github.com/stretchr/testify/require"
-	coretypes "github.com/tendermint/tendermint/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -72,7 +73,7 @@ func TestBroadcastPayForBlob(t *testing.T) {
 
 	coin := sdktypes.Coin{
 		Denom:  "token",
-		Amount: sdktypes.NewInt(10),
+		Amount: sdkmath.NewInt(10),
 	}
 	builder.SetFeeAmount(sdktypes.NewCoins(coin))
 

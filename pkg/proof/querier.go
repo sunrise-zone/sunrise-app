@@ -9,12 +9,11 @@ import (
 	"github.com/sunrise-zone/sunrise-app/pkg/shares"
 	"github.com/sunrise-zone/sunrise-app/pkg/square"
 
-	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
-
 	abci "github.com/cometbft/cometbft/abci/types"
-	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cometbft/cometbft/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 )
 
 const TxInclusionQueryPath = "txInclusionProof"
@@ -22,7 +21,7 @@ const TxInclusionQueryPath = "txInclusionProof"
 // Querier defines the logic performed when the ABCI client using the Query
 // method with the custom prove.QueryPath. The index of the transaction being
 // proved must be appended to the path. The marshalled bytes of the transaction
-// proof (cmtproto.ShareProof) are returned.
+// proof (tmproto.ShareProof) are returned.
 //
 // example path for proving the third transaction in that block:
 // custom/txInclusionProof/3
@@ -37,7 +36,7 @@ func QueryTxInclusionProof(_ sdk.Context, path []string, req abci.RequestQuery) 
 	}
 
 	// unmarshal the block data that is passed from the ABCI client
-	pbb := new(cmtproto.Block)
+	pbb := new(tmproto.Block)
 	err = pbb.Unmarshal(req.Data)
 	if err != nil {
 		return nil, fmt.Errorf("error reading block: %w", err)
@@ -82,7 +81,7 @@ func QueryShareInclusionProof(_ sdk.Context, path []string, req abci.RequestQuer
 	}
 
 	// unmarshal the block data that is passed from the ABCI client
-	pbb := new(cmtproto.Block)
+	pbb := new(tmproto.Block)
 	err = pbb.Unmarshal(req.Data)
 	if err != nil {
 		return nil, fmt.Errorf("error reading block: %w", err)
@@ -134,7 +133,7 @@ func ParseNamespace(rawShares []shares.Share, startShare, endShare int) (appns.N
 		return appns.Namespace{}, fmt.Errorf("end share %d cannot be lower than starting share %d", endShare, startShare)
 	}
 
-	if endShare > len(rawShares) {
+	if endShare >= len(rawShares) {
 		return appns.Namespace{}, fmt.Errorf("end share %d is higher than block shares %d", endShare, len(rawShares))
 	}
 

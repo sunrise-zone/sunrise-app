@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	"github.com/sunrise-zone/sunrise-app/pkg/inclusion"
-	"github.com/sunrise-zone/sunrise-app/pkg/namespace"
-	"github.com/sunrise-zone/sunrise-app/pkg/shares"
-
 	"github.com/cometbft/cometbft/pkg/consts"
 	coretypes "github.com/cometbft/cometbft/proto/tendermint/types"
+	core "github.com/cometbft/cometbft/types"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+	"github.com/sunrise-zone/sunrise-app/pkg/namespace"
+	"github.com/sunrise-zone/sunrise-app/pkg/shares"
+	"github.com/sunrise-zone/sunrise-app/x/blob/types"
 )
 
 type Builder struct {
@@ -55,7 +54,7 @@ func NewBuilder(maxSquareSize int, appVersion uint64, txs ...[]byte) (*Builder, 
 	}
 	seenFirstBlobTx := false
 	for idx, tx := range txs {
-		blobTx, isBlobTx := blob.UnmarshalBlobTx(tx)
+		blobTx, isBlobTx := core.UnmarshalBlobTx(tx)
 		if isBlobTx {
 			seenFirstBlobTx = true
 			if !builder.AppendBlobTx(blobTx) {
@@ -89,7 +88,7 @@ func (b *Builder) AppendTx(tx []byte) bool {
 
 // AppendBlobTx attempts to allocate the blob transaction to the square. It returns false if there is not
 // enough space in the square to fit the transaction.
-func (b *Builder) AppendBlobTx(blobTx blob.BlobTx) bool {
+func (b *Builder) AppendBlobTx(blobTx coretypes.BlobTx) bool {
 	iw := &coretypes.IndexWrapper{
 		Tx:           blobTx.Tx,
 		TypeId:       consts.ProtoIndexWrapperTypeID,
@@ -101,7 +100,11 @@ func (b *Builder) AppendBlobTx(blobTx blob.BlobTx) bool {
 	// create a new blob element for each blob and track the worst-case share count
 	blobElements := make([]*Element, len(blobTx.Blobs))
 	maxBlobShareCount := 0
-	for idx, blob := range blobTx.Blobs {
+	for idx, blobProto := range blobTx.Blobs {
+		blob, err := types.BlobFromProto(blobProto)
+		if err != nil {
+			return false
+		}
 		blobElements[idx] = newElement(blob, len(b.Pfbs), idx, b.subtreeRootThreshold)
 		maxBlobShareCount += blobElements[idx].maxShareOffset()
 	}
@@ -127,13 +130,12 @@ func (b *Builder) Export() (Square, error) {
 	// calculate the square size.
 	// NOTE: A future optimization could be to recalculate the currentSize based on the actual
 	// interblob padding used when the blobs are correctly ordered instead of using worst case padding.
-	ss := inclusion.BlobMinSquareSize(b.currentSize)
+	ss := shares.BlobMinSquareSize(b.currentSize)
 
-	// Sort the blobs by namespace. This uses SliceStable to preserve the order
-	// of blobs within a namespace because b.Blobs are already ordered by tx
-	// priority.
+	// sort the blobs in order of namespace. We use slice stable here to respect the
+	// order of multiple blobs within a namespace as per the priority of the PFB
 	sort.SliceStable(b.Blobs, func(i, j int) bool {
-		return bytes.Compare(b.Blobs[i].Blob.Namespace().Bytes(), b.Blobs[j].Blob.Namespace().Bytes()) < 0
+		return bytes.Compare(FullNamespace(b.Blobs[i].Blob), FullNamespace(b.Blobs[j].Blob)) < 0
 	})
 
 	// write all the regular transactions into compact shares
@@ -152,7 +154,7 @@ func (b *Builder) Export() (Square, error) {
 	for i, element := range b.Blobs {
 		// NextShareIndex returned where the next blob should start so as to comply with the share commitment rules
 		// We fill out the remaining
-		cursor = inclusion.NextShareIndex(cursor, element.NumShares, b.subtreeRootThreshold)
+		cursor = shares.NextShareIndex(cursor, element.NumShares, b.subtreeRootThreshold)
 		if i == 0 {
 			nonReservedStart = cursor
 		}
@@ -364,15 +366,20 @@ func (b *Builder) IsEmpty() bool {
 	return b.TxCounter.Size() == 0 && b.PfbCounter.Size() == 0
 }
 
+// TODO: celestia-core should provide this method for `Blob`s
+func FullNamespace(blob core.Blob) []byte {
+	return append([]byte{byte(blob.NamespaceVersion)}, blob.NamespaceID...)
+}
+
 type Element struct {
-	Blob       *blob.Blob
+	Blob       core.Blob
 	PfbIndex   int
 	BlobIndex  int
 	NumShares  int
 	MaxPadding int
 }
 
-func newElement(blob *blob.Blob, pfbIndex, blobIndex, subtreeRootThreshold int) *Element {
+func newElement(blob core.Blob, pfbIndex, blobIndex, subtreeRootThreshold int) *Element {
 	numShares := shares.SparseSharesNeeded(uint32(len(blob.Data)))
 	return &Element{
 		Blob:      blob,
@@ -380,7 +387,7 @@ func newElement(blob *blob.Blob, pfbIndex, blobIndex, subtreeRootThreshold int) 
 		BlobIndex: blobIndex,
 		NumShares: numShares,
 		//
-		// For calculating the maximum possible padding consider the following tree
+		// For cacluating the maximum possible padding consider the following tree
 		// where each leaf corresponds to a share.
 		//
 		//	Depth       Position
@@ -402,7 +409,7 @@ func newElement(blob *blob.Blob, pfbIndex, blobIndex, subtreeRootThreshold int) 
 		//
 		// Note that the padding would actually belong to the namespace of the transaction before it, but
 		// this makes no difference to the total share size.
-		MaxPadding: inclusion.SubTreeWidth(numShares, subtreeRootThreshold) - 1,
+		MaxPadding: shares.SubTreeWidth(numShares, subtreeRootThreshold) - 1,
 	}
 }
 

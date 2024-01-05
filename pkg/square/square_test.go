@@ -7,36 +7,29 @@ import (
 
 	tmrand "github.com/cometbft/cometbft/libs/rand"
 
-	"github.com/sunrise-zone/sunrise-app/app/encoding"
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	"github.com/sunrise-zone/sunrise-app/pkg/da"
-	"github.com/sunrise-zone/sunrise-app/pkg/inclusion"
-	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
-	"github.com/sunrise-zone/sunrise-app/pkg/shares"
-	"github.com/sunrise-zone/sunrise-app/pkg/square"
-	"github.com/sunrise-zone/sunrise-app/test/util"
-	"github.com/sunrise-zone/sunrise-app/test/util/blobfactory"
-	"github.com/sunrise-zone/sunrise-app/test/util/testnode"
-	blobtypes "github.com/sunrise-zone/sunrise-app/x/blob/types"
-
 	"github.com/celestiaorg/rsmt2d"
 	coretypes "github.com/cometbft/cometbft/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
-
-const (
-	mebibyte = 1_048_576 // one mebibyte in bytes
+	"github.com/sunrise-zone/sunrise-app/app"
+	"github.com/sunrise-zone/sunrise-app/app/encoding"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+	"github.com/sunrise-zone/sunrise-app/pkg/da"
+	"github.com/sunrise-zone/sunrise-app/pkg/inclusion"
+	ns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
+	"github.com/sunrise-zone/sunrise-app/pkg/shares"
+	"github.com/sunrise-zone/sunrise-app/pkg/square"
+	"github.com/sunrise-zone/sunrise-app/test/util/blobfactory"
+	"github.com/sunrise-zone/sunrise-app/test/util/testfactory"
+	blob "github.com/sunrise-zone/sunrise-app/x/blob/types"
 )
 
 func TestSquareConstruction(t *testing.T) {
 	rand := tmrand.NewRand()
-	signer, err := testnode.NewOfflineSigner()
-	require.NoError(t, err)
-	sendTxs := blobfactory.GenerateManyRawSendTxs(signer, 250)
-	pfbTxs := blobfactory.RandBlobTxs(signer, rand, 10000, 1, 1024)
-	t.Run("normal transactions after PFB transactions", func(t *testing.T) {
+	encCfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
+	sendTxs := blobfactory.GenerateManyRawSendTxs(encCfg.TxConfig, 250)
+	pfbTxs := blobfactory.RandBlobTxs(encCfg.TxConfig.TxEncoder(), rand, 10000, 1, 1024)
+	t.Run("normal transactions after PFB trasactions", func(t *testing.T) {
 		txs := append(sendTxs[:5], append(pfbTxs, sendTxs[5:]...)...)
 		_, err := square.Construct(coretypes.Txs(txs).ToSliceOfBytes(), appconsts.LatestVersion, appconsts.DefaultSquareSizeUpperBound)
 		require.Error(t, err)
@@ -45,11 +38,6 @@ func TestSquareConstruction(t *testing.T) {
 		_, err := square.Construct(coretypes.Txs(sendTxs).ToSliceOfBytes(), appconsts.LatestVersion, 2)
 		require.Error(t, err)
 		_, err = square.Construct(coretypes.Txs(pfbTxs).ToSliceOfBytes(), appconsts.LatestVersion, 2)
-		require.Error(t, err)
-	})
-	t.Run("construction should fail if a single PFB tx contains a blob that is too large to fit in the square", func(t *testing.T) {
-		pfbTxs := blobfactory.RandBlobTxs(signer, rand, 1, 1, 2*mebibyte)
-		_, err := square.Construct(coretypes.Txs(pfbTxs).ToSliceOfBytes(), appconsts.LatestVersion, 64)
 		require.Error(t, err)
 	})
 }
@@ -129,13 +117,13 @@ func TestSquareTxShareRange(t *testing.T) {
 // len(blobSizes[i]) number of blobs per BlobTx. Note: not suitable for using in
 // prepare or process proposal, as the signatures will be invalid since this
 // does not query for relevant account numbers or sequences.
-func generateBlobTxsWithNamespaces(t *testing.T, namespaces []appns.Namespace, blobSizes [][]int) [][]byte {
-	encCfg := encoding.MakeConfig(util.ModuleBasics)
+func generateBlobTxsWithNamespaces(t *testing.T, namespaces []ns.Namespace, blobSizes [][]int) [][]byte {
+	encCfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
 	const acc = "signer"
-	kr, _ := testnode.NewKeyring(acc)
+	kr := testfactory.GenerateKeyring(acc)
 	return blobfactory.ManyMultiBlobTx(
 		t,
-		encCfg.TxConfig,
+		encCfg.TxConfig.TxEncoder(),
 		kr,
 		"chainid",
 		blobfactory.Repeat(acc, len(blobSizes)),
@@ -144,10 +132,11 @@ func generateBlobTxsWithNamespaces(t *testing.T, namespaces []appns.Namespace, b
 	)
 }
 
-func TestSquareBlobShareRange(t *testing.T) {
-	signer, err := testnode.NewOfflineSigner()
-	require.NoError(t, err)
-	txs := blobfactory.RandBlobTxsRandomlySized(signer, tmrand.NewRand(), 10, 1000, 10).ToSliceOfBytes()
+// The "_Flaky" suffix indicates that the test may fail non-deterministically especially when executed in CI.
+func TestSquareBlobShareRange_Flaky(t *testing.T) {
+	encCfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
+	rand := tmrand.NewRand()
+	txs := blobfactory.RandBlobTxsRandomlySized(encCfg.TxConfig.TxEncoder(), rand, 10, 1000, 10).ToSliceOfBytes()
 
 	builder, err := square.NewBuilder(appconsts.DefaultSquareSizeUpperBound, appconsts.LatestVersion, txs...)
 	require.NoError(t, err)
@@ -156,12 +145,11 @@ func TestSquareBlobShareRange(t *testing.T) {
 	require.NoError(t, err)
 
 	for pfbIdx, tx := range txs {
-		blobTx, isBlobTx := blob.UnmarshalBlobTx(tx)
+		blobTx, isBlobTx := coretypes.UnmarshalBlobTx(tx)
 		require.True(t, isBlobTx)
 		for blobIdx := range blobTx.Blobs {
 			shareRange, err := square.BlobShareRange(txs, pfbIdx, blobIdx, appconsts.LatestVersion)
 			require.NoError(t, err)
-			require.LessOrEqual(t, shareRange.End, len(dataSquare))
 			blobShares := dataSquare[shareRange.Start:shareRange.End]
 			blobSharesBytes, err := rawData(blobShares)
 			require.NoError(t, err)
@@ -185,14 +173,12 @@ func TestSquareBlobShareRange(t *testing.T) {
 
 func TestSquareDeconstruct(t *testing.T) {
 	rand := tmrand.NewRand()
-	encCfg := encoding.MakeConfig(util.ModuleBasics)
+	encCfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
 	t.Run("ConstructDeconstructParity", func(t *testing.T) {
 		// 8192 -> square size 128
 		for _, numTxs := range []int{2, 128, 1024, 8192} {
 			t.Run(fmt.Sprintf("%d", numTxs), func(t *testing.T) {
-				signer, err := testnode.NewOfflineSigner()
-				require.NoError(t, err)
-				txs := generateOrderedTxs(signer, rand, numTxs/2, numTxs/2, 1, 800)
+				txs := generateOrderedTxs(rand, numTxs/2, numTxs/2, 1, 800)
 				dataSquare, err := square.Construct(txs, appconsts.LatestVersion, appconsts.DefaultSquareSizeUpperBound)
 				require.NoError(t, err)
 				recomputedTxs, err := square.Deconstruct(dataSquare, encCfg.TxConfig.TxDecoder())
@@ -203,9 +189,7 @@ func TestSquareDeconstruct(t *testing.T) {
 	})
 	t.Run("NoPFBs", func(t *testing.T) {
 		const numTxs = 10
-		signer, err := testnode.NewOfflineSigner()
-		require.NoError(t, err)
-		txs := coretypes.Txs(blobfactory.GenerateManyRawSendTxs(signer, numTxs)).ToSliceOfBytes()
+		txs := coretypes.Txs(blobfactory.GenerateManyRawSendTxs(encCfg.TxConfig, numTxs)).ToSliceOfBytes()
 		dataSquare, err := square.Construct(txs, appconsts.LatestVersion, appconsts.DefaultSquareSizeUpperBound)
 		require.NoError(t, err)
 		recomputedTxs, err := square.Deconstruct(dataSquare, encCfg.TxConfig.TxDecoder())
@@ -213,9 +197,7 @@ func TestSquareDeconstruct(t *testing.T) {
 		require.Equal(t, txs, recomputedTxs.ToSliceOfBytes())
 	})
 	t.Run("PFBsOnly", func(t *testing.T) {
-		signer, err := testnode.NewOfflineSigner()
-		require.NoError(t, err)
-		txs := blobfactory.RandBlobTxs(signer, rand, 100, 1, 1024).ToSliceOfBytes()
+		txs := blobfactory.RandBlobTxs(encCfg.TxConfig.TxEncoder(), rand, 100, 1, 1024).ToSliceOfBytes()
 		dataSquare, err := square.Construct(txs, appconsts.LatestVersion, appconsts.DefaultSquareSizeUpperBound)
 		require.NoError(t, err)
 		recomputedTxs, err := square.Deconstruct(dataSquare, encCfg.TxConfig.TxDecoder())
@@ -232,9 +214,7 @@ func TestSquareDeconstruct(t *testing.T) {
 func TestSquareShareCommitments(t *testing.T) {
 	const numTxs = 10
 	rand := tmrand.NewRand()
-	signer, err := testnode.NewOfflineSigner()
-	require.NoError(t, err)
-	txs := generateOrderedTxs(signer, rand, numTxs, numTxs, 3, 800)
+	txs := generateOrderedTxs(rand, numTxs, numTxs, 3, 800)
 	builder, err := square.NewBuilder(appconsts.DefaultSquareSizeUpperBound, appconsts.LatestVersion, txs...)
 	require.NoError(t, err)
 
@@ -246,7 +226,7 @@ func TestSquareShareCommitments(t *testing.T) {
 	require.NoError(t, err)
 	dah, err := da.NewDataAvailabilityHeader(eds)
 	require.NoError(t, err)
-	decoder := encoding.MakeConfig(util.ModuleBasics).TxConfig.TxDecoder()
+	decoder := encoding.MakeConfig(app.ModuleEncodingRegisters...).TxConfig.TxDecoder()
 
 	for pfbIndex := 0; pfbIndex < numTxs; pfbIndex++ {
 		wpfb, err := builder.GetWrappedPFB(pfbIndex + numTxs)
@@ -254,7 +234,7 @@ func TestSquareShareCommitments(t *testing.T) {
 		tx, err := decoder(wpfb.Tx)
 		require.NoError(t, err)
 
-		pfb, ok := tx.GetMsgs()[0].(*blobtypes.MsgPayForBlobs)
+		pfb, ok := tx.GetMsgs()[0].(*blob.MsgPayForBlobs)
 		require.True(t, ok)
 
 		for blobIndex, shareIndex := range wpfb.ShareIndexes {

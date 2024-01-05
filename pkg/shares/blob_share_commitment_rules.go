@@ -1,9 +1,7 @@
-package inclusion
+package shares
 
 import (
 	"math"
-
-	"github.com/sunrise-zone/sunrise-app/pkg/da"
 
 	"golang.org/x/exp/constraints"
 )
@@ -51,7 +49,7 @@ func BlobSharesUsedNonInteractiveDefaults(cursor, subtreeRootThreshold int, blob
 // fit in the square. The cursor is expected to be the index after the end of
 // the previous blob.
 //
-// See https://sunrise/blob/main/specs/src/specs/data_square_layout.md
+// See https://github.com/celestiaorg/celestia-app/blob/main/specs/src/specs/data_square_layout.md
 // for more information.
 func NextShareIndex(cursor, blobShareLen, subtreeRootThreshold int) int {
 	// Calculate the subtreewidth. This is the width of the first mountain in the
@@ -66,16 +64,20 @@ func NextShareIndex(cursor, blobShareLen, subtreeRootThreshold int) int {
 // roundUpByMultipleOf rounds cursor up to the next multiple of v. If cursor is divisible
 // by v, then it returns cursor
 func roundUpByMultipleOf(cursor, v int) int {
-	if cursor%v == 0 {
+	switch {
+	case cursor == 0:
 		return cursor
+	case cursor%v == 0:
+		return cursor
+	default:
+		return ((cursor / v) + 1) * v
 	}
-	return ((cursor / v) + 1) * v
 }
 
 // BlobMinSquareSize returns the minimum square size that can contain shareCount
 // number of shares.
 func BlobMinSquareSize(shareCount int) int {
-	return da.RoundUpPowerOfTwo(int(math.Ceil(math.Sqrt(float64(shareCount)))))
+	return RoundUpPowerOfTwo(int(math.Ceil(math.Sqrt(float64(shareCount)))))
 }
 
 // SubTreeWidth determines the maximum number of leaves per subtree in the share
@@ -95,7 +97,7 @@ func SubTreeWidth(shareCount, subtreeRootThreshold int) int {
 
 	// use a power of two equal to or larger than the multiple of the subtree
 	// root threshold
-	s = da.RoundUpPowerOfTwo(s)
+	s = RoundUpPowerOfTwo(s)
 
 	// use the minimum of the subtree width and the min square size, this
 	// gurarantees that a valid value is returned

@@ -3,12 +3,11 @@ package shares
 import (
 	"testing"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	"github.com/sunrise-zone/sunrise-app/test/util/testfactory"
-
+	coretypes "github.com/cometbft/cometbft/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+	"github.com/sunrise-zone/sunrise-app/test/util/testfactory"
 )
 
 func TestSparseShareContainsInfoByte(t *testing.T) {
@@ -54,7 +53,7 @@ func TestSparseShareContainsInfoByte(t *testing.T) {
 func TestSparseShareSplitterCount(t *testing.T) {
 	type testCase struct {
 		name     string
-		blob     *blob.Blob
+		blob     coretypes.Blob
 		expected int
 	}
 	testCases := []testCase{

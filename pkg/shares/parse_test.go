@@ -7,14 +7,12 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
-
 	tmrand "github.com/cometbft/cometbft/libs/rand"
 	"github.com/cometbft/cometbft/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 )
 
 func TestParseShares(t *testing.T) {
@@ -246,6 +244,12 @@ func generateRandomTxs(count, size int) types.Txs {
 	return txs
 }
 
-func generateRandomBlobWithNamespace(namespace appns.Namespace, size int) *blob.Blob {
-	return blob.New(namespace, tmrand.Bytes(size), appconsts.ShareVersionZero)
+func generateRandomBlobWithNamespace(namespace appns.Namespace, size int) types.Blob {
+	blob := types.Blob{
+		NamespaceVersion: namespace.Version,
+		NamespaceID:      namespace.ID,
+		Data:             tmrand.Bytes(size),
+		ShareVersion:     appconsts.ShareVersionZero,
+	}
+	return blob
 }

@@ -3,19 +3,17 @@ package square_test
 import (
 	"testing"
 
+	"github.com/celestiaorg/rsmt2d"
+	tmrand "github.com/cometbft/cometbft/libs/rand"
+	"github.com/stretchr/testify/require"
+	"github.com/sunrise-zone/sunrise-app/app"
 	"github.com/sunrise-zone/sunrise-app/app/encoding"
 	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
 	"github.com/sunrise-zone/sunrise-app/pkg/da"
 	"github.com/sunrise-zone/sunrise-app/pkg/inclusion"
 	"github.com/sunrise-zone/sunrise-app/pkg/shares"
 	"github.com/sunrise-zone/sunrise-app/pkg/square"
-	"github.com/sunrise-zone/sunrise-app/test/util"
-	"github.com/sunrise-zone/sunrise-app/test/util/testnode"
 	blob "github.com/sunrise-zone/sunrise-app/x/blob/types"
-
-	"github.com/celestiaorg/rsmt2d"
-	tmrand "github.com/cometbft/cometbft/libs/rand"
-	"github.com/stretchr/testify/require"
 )
 
 // FuzzSquare uses fuzzing to test the following:
@@ -38,12 +36,10 @@ func FuzzSquare(f *testing.F) {
 		if normalTxCount < 0 || pfbCount < 0 {
 			t.Skip()
 		}
-		encCfg := encoding.MakeConfig(util.ModuleBasics)
+		encCfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
 		rand := tmrand.NewRand()
 		rand.Seed(seed)
-		signer, err := testnode.NewOfflineSigner()
-		require.NoError(t, err)
-		txs := GenerateMixedRandomTxs(t, signer, rand, normalTxCount, pfbCount)
+		txs := GenerateMixedRandomTxs(t, encCfg.TxConfig, rand, normalTxCount, pfbCount)
 
 		s, orderedTxs, err := square.Build(txs, appconsts.LatestVersion, appconsts.DefaultSquareSizeUpperBound)
 		require.NoError(t, err)
@@ -64,7 +60,7 @@ func FuzzSquare(f *testing.F) {
 		dah, err := da.NewDataAvailabilityHeader(eds)
 		require.NoError(t, err)
 
-		decoder := encoding.MakeConfig(util.ModuleBasics).TxConfig.TxDecoder()
+		decoder := encoding.MakeConfig(app.ModuleEncodingRegisters...).TxConfig.TxDecoder()
 
 		builder, err := square.NewBuilder(appconsts.DefaultSquareSizeUpperBound, appconsts.LatestVersion, orderedTxs...)
 		require.NoError(t, err)

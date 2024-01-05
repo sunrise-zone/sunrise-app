@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 )
 
 func TestShareBuilderIsEmptyShare(t *testing.T) {
@@ -24,49 +23,49 @@ func TestShareBuilderIsEmptyShare(t *testing.T) {
 	testCases := []testCase{
 		{
 			name:    "first compact share empty",
-			builder: mustNewBuilder(t, appns.TxNamespace, appconsts.ShareVersionZero, true),
+			builder: NewBuilder(appns.TxNamespace, appconsts.ShareVersionZero, true),
 			data:    nil,
 			want:    true,
 		},
 		{
 			name:    "first compact share not empty",
-			builder: mustNewBuilder(t, appns.TxNamespace, appconsts.ShareVersionZero, true),
+			builder: NewBuilder(appns.TxNamespace, appconsts.ShareVersionZero, true),
 			data:    []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 			want:    false,
 		},
 		{
 			name:    "first sparse share empty",
-			builder: mustNewBuilder(t, ns1, appconsts.ShareVersionZero, true),
+			builder: NewBuilder(ns1, appconsts.ShareVersionZero, true),
 			data:    nil,
 			want:    true,
 		},
 		{
 			name:    "first sparse share not empty",
-			builder: mustNewBuilder(t, ns1, appconsts.ShareVersionZero, true),
+			builder: NewBuilder(ns1, appconsts.ShareVersionZero, true),
 			data:    []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 			want:    false,
 		},
 		{
 			name:    "continues compact share empty",
-			builder: mustNewBuilder(t, appns.TxNamespace, appconsts.ShareVersionZero, false),
+			builder: NewBuilder(appns.TxNamespace, appconsts.ShareVersionZero, false),
 			data:    nil,
 			want:    true,
 		},
 		{
 			name:    "continues compact share not empty",
-			builder: mustNewBuilder(t, appns.TxNamespace, appconsts.ShareVersionZero, false),
+			builder: NewBuilder(appns.TxNamespace, appconsts.ShareVersionZero, false),
 			data:    []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 			want:    false,
 		},
 		{
 			name:    "continues sparse share not empty",
-			builder: mustNewBuilder(t, ns1, appconsts.ShareVersionZero, false),
+			builder: NewBuilder(ns1, appconsts.ShareVersionZero, false),
 			data:    []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 			want:    false,
 		},
 		{
 			name:    "continues sparse share empty",
-			builder: mustNewBuilder(t, ns1, appconsts.ShareVersionZero, false),
+			builder: NewBuilder(ns1, appconsts.ShareVersionZero, false),
 			data:    nil,
 			want:    true,
 		},
@@ -74,6 +73,8 @@ func TestShareBuilderIsEmptyShare(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.builder.Init()
+			require.NoError(t, err)
 			tc.builder.AddData(tc.data)
 			assert.Equal(t, tc.want, tc.builder.IsEmptyShare())
 		})
@@ -92,31 +93,31 @@ func TestShareBuilderWriteSequenceLen(t *testing.T) {
 	testCases := []testCase{
 		{
 			name:    "first share",
-			builder: mustNewBuilder(t, ns1, 1, true),
+			builder: NewBuilder(ns1, 1, true),
 			wantLen: 10,
 			wantErr: false,
 		},
 		{
 			name:    "first share with long sequence",
-			builder: mustNewBuilder(t, ns1, 1, true),
+			builder: NewBuilder(ns1, 1, true),
 			wantLen: 323,
 			wantErr: false,
 		},
 		{
 			name:    "continuation sparse share",
-			builder: mustNewBuilder(t, ns1, 1, false),
+			builder: NewBuilder(ns1, 1, false),
 			wantLen: 10,
 			wantErr: true,
 		},
 		{
 			name:    "compact share",
-			builder: mustNewBuilder(t, appns.TxNamespace, 1, true),
+			builder: NewBuilder(appns.TxNamespace, 1, true),
 			wantLen: 10,
 			wantErr: false,
 		},
 		{
 			name:    "continuation compact share",
-			builder: mustNewBuilder(t, ns1, 1, false),
+			builder: NewBuilder(ns1, 1, false),
 			wantLen: 10,
 			wantErr: true,
 		},
@@ -130,6 +131,8 @@ func TestShareBuilderWriteSequenceLen(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.builder.Init()
+			require.NoError(t, err)
 			if err := tc.builder.WriteSequenceLen(tc.wantLen); tc.wantErr {
 				assert.Error(t, err)
 				return
@@ -159,55 +162,55 @@ func TestShareBuilderAddData(t *testing.T) {
 	testCases := []testCase{
 		{
 			name:    "small share",
-			builder: mustNewBuilder(t, ns1, appconsts.ShareVersionZero, true),
+			builder: NewBuilder(ns1, appconsts.ShareVersionZero, true),
 			data:    []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 			want:    nil,
 		},
 		{
 			name:    "exact fit first compact share",
-			builder: mustNewBuilder(t, appns.TxNamespace, appconsts.ShareVersionZero, true),
+			builder: NewBuilder(appns.TxNamespace, appconsts.ShareVersionZero, true),
 			data:    bytes.Repeat([]byte{1}, appconsts.ShareSize-appconsts.NamespaceSize-appconsts.ShareInfoBytes-appconsts.CompactShareReservedBytes-appconsts.SequenceLenBytes),
 			want:    nil,
 		},
 		{
 			name:    "exact fit first sparse share",
-			builder: mustNewBuilder(t, ns1, appconsts.ShareVersionZero, true),
+			builder: NewBuilder(ns1, appconsts.ShareVersionZero, true),
 			data:    bytes.Repeat([]byte{1}, appconsts.ShareSize-appconsts.NamespaceSize-appconsts.SequenceLenBytes-1 /*1 = info byte*/),
 			want:    nil,
 		},
 		{
 			name:    "exact fit continues compact share",
-			builder: mustNewBuilder(t, appns.TxNamespace, appconsts.ShareVersionZero, false),
+			builder: NewBuilder(appns.TxNamespace, appconsts.ShareVersionZero, false),
 			data:    bytes.Repeat([]byte{1}, appconsts.ShareSize-appconsts.NamespaceSize-appconsts.CompactShareReservedBytes-1 /*1 = info byte*/),
 			want:    nil,
 		},
 		{
 			name:    "exact fit continues sparse share",
-			builder: mustNewBuilder(t, ns1, appconsts.ShareVersionZero, false),
+			builder: NewBuilder(ns1, appconsts.ShareVersionZero, false),
 			data:    bytes.Repeat([]byte{1}, appconsts.ShareSize-appconsts.NamespaceSize-1 /*1 = info byte*/),
 			want:    nil,
 		},
 		{
 			name:    "oversize first compact share",
-			builder: mustNewBuilder(t, appns.TxNamespace, appconsts.ShareVersionZero, true),
+			builder: NewBuilder(appns.TxNamespace, appconsts.ShareVersionZero, true),
 			data:    bytes.Repeat([]byte{1}, 1 /*1 extra byte*/ +appconsts.ShareSize-appconsts.NamespaceSize-appconsts.CompactShareReservedBytes-appconsts.SequenceLenBytes-1 /*1 = info byte*/),
 			want:    []byte{1},
 		},
 		{
 			name:    "oversize first sparse share",
-			builder: mustNewBuilder(t, ns1, appconsts.ShareVersionZero, true),
+			builder: NewBuilder(ns1, appconsts.ShareVersionZero, true),
 			data:    bytes.Repeat([]byte{1}, 1 /*1 extra byte*/ +appconsts.ShareSize-appconsts.NamespaceSize-appconsts.SequenceLenBytes-1 /*1 = info byte*/),
 			want:    []byte{1},
 		},
 		{
 			name:    "oversize continues compact share",
-			builder: mustNewBuilder(t, appns.TxNamespace, appconsts.ShareVersionZero, false),
+			builder: NewBuilder(appns.TxNamespace, appconsts.ShareVersionZero, false),
 			data:    bytes.Repeat([]byte{1}, 1 /*1 extra byte*/ +appconsts.ShareSize-appconsts.NamespaceSize-appconsts.CompactShareReservedBytes-1 /*1 = info byte*/),
 			want:    []byte{1},
 		},
 		{
 			name:    "oversize continues sparse share",
-			builder: mustNewBuilder(t, ns1, appconsts.ShareVersionZero, false),
+			builder: NewBuilder(ns1, appconsts.ShareVersionZero, false),
 			data:    bytes.Repeat([]byte{1}, 1 /*1 extra byte*/ +appconsts.ShareSize-appconsts.NamespaceSize-1 /*1 = info byte*/),
 			want:    []byte{1},
 		},
@@ -215,6 +218,9 @@ func TestShareBuilderAddData(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.builder.Init()
+			require.NoError(t, err)
+
 			got := tc.builder.AddData(tc.data)
 			assert.Equal(t, tc.want, got)
 		})
@@ -311,11 +317,4 @@ func TestShareBuilderImportRawData(t *testing.T) {
 			}
 		})
 	}
-}
-
-// mustNewBuilder returns a new builder with the given parameters. It fails the test if an error is encountered.
-func mustNewBuilder(t *testing.T, ns appns.Namespace, shareVersion uint8, isFirstShare bool) *Builder {
-	b, err := NewBuilder(ns, shareVersion, isFirstShare)
-	require.NoError(t, err)
-	return b
 }

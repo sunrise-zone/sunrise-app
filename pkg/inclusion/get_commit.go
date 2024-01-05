@@ -3,9 +3,8 @@ package inclusion
 import (
 	"errors"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/da"
-
 	"github.com/cometbft/cometbft/crypto/merkle"
+	"github.com/sunrise-zone/sunrise-app/pkg/da"
 )
 
 // GetCommitment gets the share commitment for a blob in the original data

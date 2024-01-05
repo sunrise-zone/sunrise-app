@@ -5,18 +5,16 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/cometbft/cometbft/crypto/merkle"
+	tmbytes "github.com/cometbft/cometbft/libs/bytes"
+	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"github.com/cometbft/cometbft/types"
 	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
 	"github.com/sunrise-zone/sunrise-app/pkg/da"
 	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 	"github.com/sunrise-zone/sunrise-app/pkg/shares"
 	"github.com/sunrise-zone/sunrise-app/pkg/square"
 	"github.com/sunrise-zone/sunrise-app/pkg/wrapper"
-
-	"github.com/cometbft/cometbft/crypto/merkle"
-	tmbytes "github.com/cometbft/cometbft/libs/bytes"
-	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	"github.com/cometbft/cometbft/types"
 )
 
 // NewTxInclusionProof returns a new share inclusion proof for the given
@@ -46,7 +44,7 @@ func NewTxInclusionProof(txs [][]byte, txIndex, appVersion uint64) (types.ShareP
 }
 
 func getTxNamespace(tx []byte) (ns appns.Namespace) {
-	_, isBlobTx := blob.UnmarshalBlobTx(tx)
+	_, isBlobTx := types.UnmarshalBlobTx(tx)
 	if isBlobTx {
 		return appns.PayForBlobNamespace
 	}
@@ -101,7 +99,7 @@ func NewShareInclusionProof(
 		rows[i-startRow] = shares
 	}
 
-	var shareProofs []*cmtproto.NMTProof //nolint:prealloc
+	var shareProofs []*tmproto.NMTProof //nolint:prealloc
 	var rawShares [][]byte
 	for i, row := range rows {
 		// create an nmt to generate a proof.
@@ -143,7 +141,7 @@ func NewShareInclusionProof(
 			return types.ShareProof{}, err
 		}
 
-		shareProofs = append(shareProofs, &cmtproto.NMTProof{
+		shareProofs = append(shareProofs, &tmproto.NMTProof{
 			Start:    int32(proof.Start()),
 			End:      int32(proof.End()),
 			Nodes:    proof.Nodes(),

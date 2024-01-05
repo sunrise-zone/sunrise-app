@@ -7,7 +7,7 @@ import (
 
 	"github.com/cosmos/cosmos-sdk/types"
 	"github.com/gogo/protobuf/grpc"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
+	blob "github.com/sunrise-zone/sunrise-app/x/blob/types"
 )
 
 // Sequence is the basic unit for programmatic transaction generation.
@@ -30,13 +30,13 @@ type Sequence interface {
 	Next(ctx context.Context, querier grpc.ClientConn, rand *rand.Rand) (Operation, error)
 }
 
-// Operation represents a series of messages and blobs that are to be bundled
-// in a single transaction. A delay (in heights) may also be set before the transaction is sent.
+// An operation represents a series of messages and blobs that are to be bundled in a
+// single transaction. A delay (in heights) may also be set before the transaction is sent.
 // The gas limit and price can also be set. If left at 0, the DefaultGasLimit will be used.
 type Operation struct {
 	Msgs     []types.Msg
 	Blobs    []*blob.Blob
-	Delay    uint64
+	Delay    int64
 	GasLimit uint64
 	GasPrice float64
 }

@@ -3,19 +3,18 @@ package testfactory
 import (
 	"bytes"
 	"encoding/binary"
-
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
+	"sort"
 
 	tmrand "github.com/cometbft/cometbft/libs/rand"
 	"github.com/cometbft/cometbft/types"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 )
 
-func GenerateRandomlySizedBlobs(count, maxBlobSize int) []*blob.Blob {
-	blobs := make([]*blob.Blob, count)
+func GenerateRandomlySizedBlobs(count, maxBlobSize int) []types.Blob {
+	blobs := make([]types.Blob, count)
 	for i := 0; i < count; i++ {
-		blobs[i] = GenerateRandomBlob(tmrand.NewRand().Intn(maxBlobSize))
+		blobs[i] = GenerateRandomBlob(tmrand.Intn(maxBlobSize))
 		if len(blobs[i].Data) == 0 {
 			i--
 		}
@@ -26,7 +25,7 @@ func GenerateRandomlySizedBlobs(count, maxBlobSize int) []*blob.Blob {
 		blobs = nil
 	}
 
-	blob.Sort(blobs)
+	blobs = SortBlobs(blobs)
 	return blobs
 }
 
@@ -50,14 +49,19 @@ func GenerateBlobsWithNamespace(count int, blobSize int, ns appns.Namespace) []t
 	return blobs
 }
 
-func GenerateRandomBlob(dataSize int) *blob.Blob {
-	ns := appns.MustNewV0(bytes.Repeat([]byte{0x1}, appns.NamespaceVersionZeroIDSize))
-	return blob.New(ns, tmrand.Bytes(dataSize), appconsts.ShareVersionZero)
+func GenerateRandomBlob(dataSize int) types.Blob {
+	blob := types.Blob{
+		NamespaceVersion: appns.NamespaceVersionZero,
+		NamespaceID:      append(appns.NamespaceVersionZeroPrefix, bytes.Repeat([]byte{0x1}, appns.NamespaceVersionZeroIDSize)...),
+		Data:             tmrand.Bytes(dataSize),
+		ShareVersion:     appconsts.ShareVersionZero,
+	}
+	return blob
 }
 
 // GenerateRandomBlobOfShareCount returns a blob that spans the given
 // number of shares
-func GenerateRandomBlobOfShareCount(count int) *blob.Blob {
+func GenerateRandomBlobOfShareCount(count int) types.Blob {
 	size := rawBlobSize(appconsts.FirstSparseShareContentSize * count)
 	return GenerateRandomBlob(size)
 }
@@ -73,4 +77,9 @@ func rawBlobSize(totalSize int) int {
 func DelimLen(size uint64) int {
 	lenBuf := make([]byte, binary.MaxVarintLen64)
 	return binary.PutUvarint(lenBuf, size)
+}
+
+func SortBlobs(blobs []types.Blob) []types.Blob {
+	sort.Slice(blobs, func(i, j int) bool { return bytes.Compare(blobs[i].NamespaceID, blobs[j].NamespaceID) < 0 })
+	return blobs
 }

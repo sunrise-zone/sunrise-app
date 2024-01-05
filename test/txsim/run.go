@@ -8,15 +8,10 @@ import (
 	"time"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/sunrise-zone/sunrise-app/app"
 	"github.com/sunrise-zone/sunrise-app/app/encoding"
-	"github.com/sunrise-zone/sunrise-app/pkg/user"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
-
-const DefaultSeed = 900183116
 
 // Run is the entrypoint function for starting the txsim client. The lifecycle of the client is managed
 // through the context. At least one grpc and rpc endpoint must be provided. The client relies on a
@@ -30,34 +25,36 @@ const DefaultSeed = 900183116
 // repeatedly sends random PFBs to be scaled up to 1000 accounts sending PFBs.
 func Run(
 	ctx context.Context,
-	grpcEndpoint string,
+	rpcEndpoints, grpcEndpoints []string,
 	keys keyring.Keyring,
-	encCfg encoding.Config,
-	opts *Options,
+	masterAccName string,
+	seed int64,
+	pollTime time.Duration,
+	useFeegrant bool,
 	sequences ...Sequence,
 ) error {
-	opts.Fill()
-	r := rand.New(rand.NewSource(opts.seed))
+	r := rand.New(rand.NewSource(seed))
 
-	conn, err := grpc.Dial(grpcEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return fmt.Errorf("dialing %s: %w", grpcEndpoint, err)
-	}
-
-	if opts.suppressLogger {
-		// TODO (@cmwaters): we can do better than setting this globally
-		zerolog.SetGlobalLevel(zerolog.Disabled)
-	}
-
-	// Create the account manager to handle account transactions.
-	manager, err := NewAccountManager(ctx, keys, encCfg, opts.masterAcc, conn, opts.pollTime, opts.useFeeGrant)
+	txClient, err := NewTxClient(ctx, encoding.MakeConfig(app.ModuleEncodingRegisters...), pollTime, rpcEndpoints)
 	if err != nil {
 		return err
 	}
 
-	// Initialize each of the sequences by allowing them to allocate accounts.
+	queryClient, err := NewQueryClient(grpcEndpoints)
+	if err != nil {
+		return err
+	}
+	defer queryClient.Close()
+
+	// Create the account manager to handle account transactions.
+	manager, err := NewAccountManager(ctx, keys, masterAccName, txClient, queryClient, useFeegrant)
+	if err != nil {
+		return err
+	}
+
+	// Initiaize each of the sequences by allowing them to allocate accounts.
 	for _, sequence := range sequences {
-		sequence.Init(ctx, manager.conn, manager.AllocateAccounts, r, opts.useFeeGrant)
+		sequence.Init(ctx, manager.query.Conn(), manager.AllocateAccounts, r, useFeegrant)
 	}
 
 	// Generate the allotted accounts on chain by sending them sufficient funds
@@ -71,11 +68,11 @@ func Run(
 	for idx, sequence := range sequences {
 		go func(seqID int, sequence Sequence, errCh chan<- error) {
 			opNum := 0
-			r := rand.New(rand.NewSource(opts.seed))
+			r := rand.New(rand.NewSource(seed))
 			// each sequence loops through the next set of operations, the new messages are then
 			// submitted on chain
 			for {
-				ops, err := sequence.Next(ctx, manager.conn, r)
+				ops, err := sequence.Next(ctx, manager.query.Conn(), r)
 				if err != nil {
 					errCh <- fmt.Errorf("sequence %d: %w", seqID, err)
 					return
@@ -113,52 +110,4 @@ func Run(
 	}
 
 	return finalErr
-}
-
-type Options struct {
-	seed           int64
-	masterAcc      string
-	pollTime       time.Duration
-	useFeeGrant    bool
-	suppressLogger bool
-}
-
-func (o *Options) Fill() {
-	if o.seed == 0 {
-		o.seed = DefaultSeed
-	}
-	if o.pollTime == 0 {
-		o.pollTime = user.DefaultPollTime
-	}
-}
-
-func DefaultOptions() *Options {
-	opts := &Options{}
-	opts.Fill()
-	return opts
-}
-
-func (o *Options) SuppressLogs() *Options {
-	o.suppressLogger = true
-	return o
-}
-
-func (o *Options) UseFeeGrant() *Options {
-	o.useFeeGrant = true
-	return o
-}
-
-func (o *Options) SpecifyMasterAccount(name string) *Options {
-	o.masterAcc = name
-	return o
-}
-
-func (o *Options) WithSeed(seed int64) *Options {
-	o.seed = seed
-	return o
-}
-
-func (o *Options) WithPollTime(pollTime time.Duration) *Options {
-	o.pollTime = pollTime
-	return o
 }

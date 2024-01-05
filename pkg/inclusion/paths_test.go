@@ -4,10 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
 )
 
 func Test_calculateSubTreeRootCoordinates(t *testing.T) {

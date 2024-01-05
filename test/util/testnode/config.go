@@ -1,46 +1,47 @@
 package testnode
 
 import (
+	"fmt"
 	"time"
 
-	"github.com/sunrise-zone/sunrise-app/cmd/sunrised/cmd"
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/test/util/genesis"
-
 	tmconfig "github.com/cometbft/cometbft/config"
+	tmrand "github.com/cometbft/cometbft/libs/rand"
 	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"github.com/cometbft/cometbft/types"
+	"github.com/cosmos/cosmos-sdk/server"
 	srvconfig "github.com/cosmos/cosmos-sdk/server/config"
 	srvtypes "github.com/cosmos/cosmos-sdk/server/types"
+	"github.com/sunrise-zone/sunrise-app/cmd/celestia-appd/cmd"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
 )
 
-const (
-	kibibyte                    = 1024      // bytes
-	mebibyte                    = 1_048_576 // bytes
-	DefaultValidatorAccountName = "validator"
-)
-
-type UniversalTestingConfig struct {
+// Config is the configuration of a test node.
+type Config struct {
+	// ChainID is the chain ID of the network.
+	ChainID string
 	// TmConfig is the Tendermint configuration used for the network.
 	TmConfig *tmconfig.Config
 	// AppConfig is the application configuration of the test node.
 	AppConfig *srvconfig.Config
-	// AppOptions are the application options of the test node.
+	// ConsensusParams are the consensus parameters of the test node.
+	ConsensusParams *tmproto.ConsensusParams
+	// AppOptions are the application options of the test node. Portions of the
+	// app config will automatically be set into the app option when the app
+	// config is set.
 	AppOptions *KVAppOptions
+	// GenesisOptions are the genesis options of the test node.
+	GenesisOptions []GenesisOption
+	// Accounts are the accounts of the test node.
+	Accounts []string
 	// AppCreator is used to create the application for the testnode.
 	AppCreator srvtypes.AppCreator
-	// SuppressLogs in testnode. This should be set to true when running
-	// testground tests.
-	SuppressLogs bool
+	// SupressLogs
+	SupressLogs bool
 }
 
-// Config is the configuration of a test node.
-type Config struct {
-	Genesis *genesis.Genesis
-	UniversalTestingConfig
-}
-
-func (c *Config) WithGenesis(g *genesis.Genesis) *Config {
-	c.Genesis = g
+// WithChainID sets the ChainID and returns the Config.
+func (c *Config) WithChainID(s string) *Config {
+	c.ChainID = s
 	return c
 }
 
@@ -51,14 +52,40 @@ func (c *Config) WithTendermintConfig(conf *tmconfig.Config) *Config {
 }
 
 // WithAppConfig sets the AppConfig and returns the Config.
+//
+// Warning: This method will also overwrite relevant portions of the app config
+// to the app options. See the SetFromAppConfig method for more information on
+// which values are overwritten.
 func (c *Config) WithAppConfig(conf *srvconfig.Config) *Config {
 	c.AppConfig = conf
+	c.AppOptions.SetFromAppConfig(conf)
+	return c
+}
+
+// WithConsensusParams sets the ConsensusParams and returns the Config.
+func (c *Config) WithConsensusParams(params *tmproto.ConsensusParams) *Config {
+	c.ConsensusParams = params
 	return c
 }
 
 // WithAppOptions sets the AppOptions and returns the Config.
+//
+// Warning: If the app config is set after this, it could overwrite some values.
+// See SetFromAppConfig for more information on which values are overwritten.
 func (c *Config) WithAppOptions(opts *KVAppOptions) *Config {
 	c.AppOptions = opts
+	return c
+}
+
+// WithGenesisOptions sets the GenesisOptions and returns the Config.
+func (c *Config) WithGenesisOptions(opts ...GenesisOption) *Config {
+	c.GenesisOptions = opts
+	return c
+}
+
+// WithAccounts sets the Accounts and returns the Config.
+func (c *Config) WithAccounts(accs []string) *Config {
+	c.Accounts = accs
 	return c
 }
 
@@ -68,9 +95,9 @@ func (c *Config) WithAppCreator(creator srvtypes.AppCreator) *Config {
 	return c
 }
 
-// WithSuppressLogs sets the SuppressLogs and returns the Config.
-func (c *Config) WithSuppressLogs(sl bool) *Config {
-	c.SuppressLogs = sl
+// WithSupressLogs sets the SupressLogs and returns the Config.
+func (c *Config) WithSupressLogs(sl bool) *Config {
+	c.SupressLogs = sl
 	return c
 }
 
@@ -80,77 +107,100 @@ func (c *Config) WithTimeoutCommit(d time.Duration) *Config {
 	return c
 }
 
-// WithFundedAccounts sets the genesis accounts and returns the Config.
-func (c *Config) WithFundedAccounts(accounts ...string) *Config {
-	c.Genesis = c.Genesis.WithAccounts(
-		genesis.NewAccounts(999999999999999999, accounts...)...,
-	)
-	return c
-}
-
-// WithModifiers sets the genesis options and returns the Config.
-func (c *Config) WithModifiers(ops ...genesis.Modifier) *Config {
-	c.Genesis = c.Genesis.WithModifiers(ops...)
-	return c
-}
-
-// WithGenesisTime sets the genesis time and returns the Config.
-func (c *Config) WithGenesisTime(t time.Time) *Config {
-	c.Genesis = c.Genesis.WithGenesisTime(t)
-	return c
-}
-
-// WithChainID sets the chain ID and returns the Config.
-func (c *Config) WithChainID(id string) *Config {
-	c.Genesis = c.Genesis.WithChainID(id)
-	return c
-}
-
-// WithConsensusParams sets the consensus params and returns the Config.
-func (c *Config) WithConsensusParams(params *tmproto.ConsensusParams) *Config {
-	c.Genesis = c.Genesis.WithConsensusParams(params)
-	return c
-}
-
-// DefaultConfig returns the default configuration of a test node.
 func DefaultConfig() *Config {
+	tmcfg := DefaultTendermintConfig()
+	tmcfg.Consensus.TimeoutCommit = 1 * time.Millisecond
 	cfg := &Config{}
 	return cfg.
-		WithGenesis(
-			genesis.NewDefaultGenesis().
-				WithValidators(genesis.NewDefaultValidator(DefaultValidatorAccountName)),
-		).
+		WithAccounts([]string{}).
+		WithChainID(tmrand.Str(6)).
 		WithTendermintConfig(DefaultTendermintConfig()).
-		WithAppConfig(DefaultAppConfig()).
+		WithConsensusParams(DefaultParams()).
 		WithAppOptions(DefaultAppOptions()).
+		WithAppConfig(DefaultAppConfig()).
+		WithGenesisOptions().
 		WithAppCreator(cmd.NewAppServer).
-		WithSuppressLogs(true).
-		WithConsensusParams(DefaultConsensusParams())
+		WithSupressLogs(true)
 }
 
-func DefaultConsensusParams() *tmproto.ConsensusParams {
-	var cparams tmproto.ConsensusParams
+type KVAppOptions struct {
+	options map[string]interface{}
+}
+
+func NewKVAppOptions() *KVAppOptions {
+	return &KVAppOptions{options: make(map[string]interface{})}
+}
+
+// Get implements AppOptions
+func (ao *KVAppOptions) Get(o string) interface{} {
+	return ao.options[o]
+}
+
+// Set adds an option to the KVAppOptions
+func (ao *KVAppOptions) Set(o string, v interface{}) {
+	ao.options[o] = v
+}
+
+// SetMany adds an option to the KVAppOptions
+func (ao *KVAppOptions) SetMany(o map[string]interface{}) {
+	for k, v := range o {
+		ao.Set(k, v)
+	}
+}
+
+func (ao *KVAppOptions) SetFromAppConfig(appCfg *srvconfig.Config) {
+	opts := map[string]interface{}{
+		server.FlagPruning:                     appCfg.Pruning,
+		server.FlagPruningKeepRecent:           appCfg.PruningKeepRecent,
+		server.FlagPruningInterval:             appCfg.PruningInterval,
+		server.FlagMinGasPrices:                appCfg.MinGasPrices,
+		server.FlagMinRetainBlocks:             appCfg.MinRetainBlocks,
+		server.FlagIndexEvents:                 appCfg.IndexEvents,
+		server.FlagStateSyncSnapshotInterval:   appCfg.StateSync.SnapshotInterval,
+		server.FlagStateSyncSnapshotKeepRecent: appCfg.StateSync.SnapshotKeepRecent,
+		server.FlagHaltHeight:                  appCfg.HaltHeight,
+		server.FlagHaltTime:                    appCfg.HaltTime,
+	}
+	ao.SetMany(opts)
+}
+
+// DefaultAppOptions returns the default application options. The options are
+// set using the default app config. If the app config is set after this, it
+// will overwrite these values.
+func DefaultAppOptions() *KVAppOptions {
+	opts := NewKVAppOptions()
+	opts.SetFromAppConfig(DefaultAppConfig())
+	return opts
+}
+
+func DefaultParams() *tmproto.ConsensusParams {
+	cparams := types.DefaultConsensusParams()
+	cparams.Block.TimeIotaMs = 1
 	cparams.Block.MaxBytes = appconsts.DefaultMaxBytes
-	cparams.Version.App = appconsts.LatestVersion
-	return &cparams
+	return cparams
 }
 
 func DefaultTendermintConfig() *tmconfig.Config {
 	tmCfg := tmconfig.DefaultConfig()
-	// Reduce the timeout commit to 1ms to speed up the rate at which the test
-	// node produces blocks.
-	tmCfg.Consensus.TimeoutCommit = 1 * time.Millisecond
+	// Reduce the target height duration so that blocks are produced faster
+	// during tests.
+	tmCfg.Consensus.TimeoutCommit = 100 * time.Millisecond
+	tmCfg.Consensus.TimeoutPropose = 200 * time.Millisecond
 
-	// Override the mempool's MaxTxBytes to allow the testnode to accept a
+	// set the mempool's MaxTxBytes to allow the testnode to accept a
 	// transaction that fills the entire square. Any blob transaction larger
 	// than the square size will still fail no matter what.
-	maxTxBytes := appconsts.DefaultSquareSizeUpperBound * appconsts.DefaultSquareSizeUpperBound * appconsts.ContinuationSparseShareContentSize
-	tmCfg.Mempool.MaxTxBytes = maxTxBytes
+	tmCfg.Mempool.MaxTxBytes = appconsts.DefaultMaxBytes
 
-	// Override the MaxBodyBytes to allow the testnode to accept very large
-	// transactions and respond to queries with large responses (200 MiB was
+	// remove all barriers from the testnode being able to accept very large
+	// transactions and respond to very queries with large responses (~200MB was
 	// chosen only as an arbitrary large number).
-	tmCfg.RPC.MaxBodyBytes = 200 * mebibyte
+	tmCfg.RPC.MaxBodyBytes = 200_000_000
+
+	// set all the ports to random open ones
+	tmCfg.RPC.ListenAddress = fmt.Sprintf("tcp://127.0.0.1:%d", GetFreePort())
+	tmCfg.P2P.ListenAddress = fmt.Sprintf("tcp://127.0.0.1:%d", GetFreePort())
+	tmCfg.RPC.GRPCListenAddress = fmt.Sprintf("tcp://127.0.0.1:%d", GetFreePort())
 
 	return tmCfg
 }

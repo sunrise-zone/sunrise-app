@@ -22,26 +22,28 @@ func NewEmptyBuilder() *Builder {
 	}
 }
 
-// NewBuilder returns a new share builder.
-func NewBuilder(ns appns.Namespace, shareVersion uint8, isFirstShare bool) (*Builder, error) {
-	b := Builder{
+// Init() needs to be called right after this method
+func NewBuilder(ns appns.Namespace, shareVersion uint8, isFirstShare bool) *Builder {
+	return &Builder{
 		namespace:      ns,
 		shareVersion:   shareVersion,
 		isFirstShare:   isFirstShare,
 		isCompactShare: isCompactShare(ns),
 	}
-	if err := b.init(); err != nil {
-		return nil, err
-	}
-	return &b, nil
 }
 
-// init initializes the share builder by populating rawShareData.
-func (b *Builder) init() error {
+func (b *Builder) Init() (*Builder, error) {
 	if b.isCompactShare {
-		return b.prepareCompactShare()
+		if err := b.prepareCompactShare(); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := b.prepareSparseShare(); err != nil {
+			return nil, err
+		}
 	}
-	return b.prepareSparseShare()
+
+	return b, nil
 }
 
 func (b *Builder) AvailableBytes() int {

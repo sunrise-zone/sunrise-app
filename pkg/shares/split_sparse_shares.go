@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 
+	coretypes "github.com/cometbft/cometbft/types"
 	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-
+	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 	"golang.org/x/exp/slices"
 )
 
@@ -23,20 +23,19 @@ func NewSparseShareSplitter() *SparseShareSplitter {
 
 // Write writes the provided blob to this sparse share splitter. It returns an
 // error or nil if no error is encountered.
-func (sss *SparseShareSplitter) Write(blob *blob.Blob) error {
-	if err := blob.Validate(); err != nil {
-		return err
-	}
-
-	if !slices.Contains(appconsts.SupportedShareVersions, uint8(blob.ShareVersion)) {
+func (sss *SparseShareSplitter) Write(blob coretypes.Blob) error {
+	if !slices.Contains(appconsts.SupportedShareVersions, blob.ShareVersion) {
 		return fmt.Errorf("unsupported share version: %d", blob.ShareVersion)
 	}
 
 	rawData := blob.Data
-	blobNamespace := blob.Namespace()
+	blobNamespace, err := appns.New(blob.NamespaceVersion, blob.NamespaceID)
+	if err != nil {
+		return err
+	}
 
-	// First share (note by validating the blob we can safely cast the share version to uint8)
-	b, err := NewBuilder(blobNamespace, uint8(blob.ShareVersion), true)
+	// First share
+	b, err := NewBuilder(blobNamespace, blob.ShareVersion, true).Init()
 	if err != nil {
 		return err
 	}
@@ -58,7 +57,7 @@ func (sss *SparseShareSplitter) Write(blob *blob.Blob) error {
 		}
 		sss.shares = append(sss.shares, *share)
 
-		b, err = NewBuilder(blobNamespace, uint8(blob.ShareVersion), false)
+		b, err = NewBuilder(blobNamespace, blob.ShareVersion, false).Init()
 		if err != nil {
 			return err
 		}

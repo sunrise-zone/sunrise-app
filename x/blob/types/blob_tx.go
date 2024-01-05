@@ -2,31 +2,36 @@ package types
 
 import (
 	"bytes"
+	"fmt"
+	math "math"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	"github.com/sunrise-zone/sunrise-app/pkg/inclusion"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
+
+	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	core "github.com/cometbft/cometbft/types"
+	"github.com/cosmos/cosmos-sdk/client"
 	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 	shares "github.com/sunrise-zone/sunrise-app/pkg/shares"
-
-	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	"github.com/cosmos/cosmos-sdk/client"
 )
+
+// Blob wraps the tendermint type so that users can simply import this one.
+type Blob = tmproto.Blob
 
 // NewBlob creates a new coretypes.Blob from the provided data after performing
 // basic stateless checks over it.
-func NewBlob(ns appns.Namespace, data []byte, shareVersion uint8) (*blob.Blob, error) {
+func NewBlob(ns appns.Namespace, blob []byte, shareVersion uint8) (*Blob, error) {
 	err := ValidateBlobNamespace(ns)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(data) == 0 {
+	if len(blob) == 0 {
 		return nil, ErrZeroBlobSize
 	}
 
-	return &blob.Blob{
+	return &tmproto.Blob{
 		NamespaceId:      ns.ID,
-		Data:             data,
+		Data:             blob,
 		ShareVersion:     uint32(shareVersion),
 		NamespaceVersion: uint32(ns.Version),
 	}, nil
@@ -34,7 +39,7 @@ func NewBlob(ns appns.Namespace, data []byte, shareVersion uint8) (*blob.Blob, e
 
 // ValidateBlobTx performs stateless checks on the BlobTx to ensure that the
 // blobs attached to the transaction are valid.
-func ValidateBlobTx(txcfg client.TxEncodingConfig, bTx blob.BlobTx) error {
+func ValidateBlobTx(txcfg client.TxEncodingConfig, bTx tmproto.BlobTx) error {
 	sdkTx, err := txcfg.TxDecoder()(bTx.Tx)
 	if err != nil {
 		return err
@@ -91,7 +96,7 @@ func ValidateBlobTx(txcfg client.TxEncodingConfig, bTx blob.BlobTx) error {
 
 	// verify that the commitment of the blob matches that of the msgPFB
 	for i, commitment := range msgPFB.ShareCommitments {
-		calculatedCommit, err := inclusion.CreateCommitment(bTx.Blobs[i])
+		calculatedCommit, err := CreateCommitment(bTx.Blobs[i])
 		if err != nil {
 			return ErrCalculateCommitment
 		}
@@ -103,12 +108,33 @@ func ValidateBlobTx(txcfg client.TxEncodingConfig, bTx blob.BlobTx) error {
 	return nil
 }
 
-func BlobTxSharesUsed(btx cmtproto.BlobTx) int {
+func BlobTxSharesUsed(btx tmproto.BlobTx) int {
 	sharesUsed := 0
 	for _, blob := range btx.Blobs {
 		sharesUsed += shares.SparseSharesNeeded(uint32(len(blob.Data)))
 	}
 	return sharesUsed
+}
+
+func BlobFromProto(p *tmproto.Blob) (core.Blob, error) {
+	if p == nil {
+		return core.Blob{}, fmt.Errorf("nil blob")
+	}
+
+	if p.ShareVersion > math.MaxUint8 {
+		return core.Blob{}, fmt.Errorf("invalid share version %d", p.ShareVersion)
+	}
+
+	if p.NamespaceVersion > appconsts.NamespaceVersionMaxValue {
+		return core.Blob{}, fmt.Errorf("invalid namespace version %d", p.NamespaceVersion)
+	}
+
+	return core.Blob{
+		NamespaceID:      p.NamespaceId,
+		Data:             p.Data,
+		ShareVersion:     uint8(p.ShareVersion),
+		NamespaceVersion: uint8(p.NamespaceVersion),
+	}, nil
 }
 
 func equalSlices[T comparable](a, b []T) bool {

@@ -8,7 +8,6 @@ import (
 
 	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	coretypes "github.com/cometbft/cometbft/types"
-	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
@@ -16,45 +15,62 @@ import (
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	"github.com/stretchr/testify/require"
 	"github.com/sunrise-zone/sunrise-app/app"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	"github.com/sunrise-zone/sunrise-app/pkg/user"
 	"github.com/sunrise-zone/sunrise-app/test/util/blobfactory"
-	"github.com/sunrise-zone/sunrise-app/test/util/testfactory"
+	blobtypes "github.com/sunrise-zone/sunrise-app/x/blob/types"
 )
 
 // RandBlobTxsWithAccounts will create random blob transactions using the
 // provided configuration. The account info is queried directly from the
 // application. One blob transaction is generated per account provided.
 func RandBlobTxsWithAccounts(
-	t *testing.T,
+	_ *testing.T,
 	capp *app.App,
-	cfg client.TxConfig,
+	_ sdk.TxEncoder,
 	kr keyring.Keyring,
 	size int,
 	blobCount int,
 	randSize bool,
 	chainid string,
 	accounts []string,
-	extraOpts ...user.TxOption,
+	extraOpts ...blobtypes.TxBuilderOption,
 ) []coretypes.Tx {
-	opts := append(blobfactory.DefaultTxOpts(), extraOpts...)
+	coin := sdk.Coin{
+		Denom:  app.BondDenom,
+		Amount: sdk.NewInt(10),
+	}
 
-	require.Greater(t, size, 0)
-	require.Greater(t, blobCount, 0)
+	opts := []blobtypes.TxBuilderOption{
+		blobtypes.SetFeeAmount(sdk.NewCoins(coin)),
+		blobtypes.SetGasLimit(100000000000000),
+	}
+	opts = append(opts, extraOpts...)
 
 	txs := make([]coretypes.Tx, len(accounts))
 	for i := 0; i < len(accounts); i++ {
-		addr := testfactory.GetAddress(kr, accounts[i])
-		acc := DirectQueryAccount(capp, addr)
-		signer, err := user.NewSigner(kr, nil, addr, cfg, chainid, acc.GetAccountNumber(), acc.GetSequence())
-		require.NoError(t, err)
+		signer := blobtypes.NewKeyringSigner(kr, accounts[i], chainid)
 
+		addr, err := signer.GetSignerInfo().GetAddress()
+		if err != nil {
+			panic(err)
+		}
+
+		// update the account info in the signer so the signature is valid
+		acc := DirectQueryAccount(capp, addr)
+		signer.SetAccountNumber(0)
+		signer.SetSequence(acc.GetSequence())
+
+		if size <= 0 {
+			panic("size should be positive")
+		}
 		randomizedSize := size
 		if randSize {
 			randomizedSize = rand.Intn(size)
 			if randomizedSize == 0 {
 				randomizedSize = 1
 			}
+		}
+		if blobCount <= 0 {
+			panic("blobCount should be strictly positive")
 		}
 		randomizedBlobCount := blobCount
 		if randSize {
@@ -64,10 +80,23 @@ func RandBlobTxsWithAccounts(
 			}
 		}
 
-		_, blobs := blobfactory.RandMsgPayForBlobsWithSigner(tmrand.NewRand(), addr.String(), randomizedSize, randomizedBlobCount)
-		tx, err := signer.CreatePayForBlob(blobs, opts...)
-		require.NoError(t, err)
-		txs[i] = tx
+		msg, blobs := blobfactory.RandMsgPayForBlobsWithSigner(tmrand.NewRand(), addr.String(), randomizedSize, randomizedBlobCount)
+		builder := signer.NewTxBuilder(opts...)
+		stx, err := signer.BuildSignedTx(builder, msg)
+		if err != nil {
+			panic(err)
+		}
+
+		rawTx, err := signer.EncodeTx(stx)
+		if err != nil {
+			panic(err)
+		}
+		cTx, err := coretypes.MarshalBlobTx(rawTx, blobs...)
+		if err != nil {
+			panic(err)
+		}
+
+		txs[i] = cTx
 	}
 
 	return txs
@@ -82,8 +111,8 @@ func DirectQueryAccount(app *app.App, addr sdk.AccAddress) authtypes.AccountI {
 // provided configuration. One blob transaction is generated per account
 // provided. The sequence and account numbers are set manually using the provided values.
 func RandBlobTxsWithManualSequence(
-	t *testing.T,
-	cfg client.TxConfig,
+	_ *testing.T,
+	_ sdk.TxEncoder,
 	kr keyring.Keyring,
 	size int,
 	blobCount int,
@@ -93,17 +122,31 @@ func RandBlobTxsWithManualSequence(
 	sequence, accountNum uint64,
 	invalidSignature bool,
 ) []coretypes.Tx {
-	t.Helper()
-	require.Greater(t, size, 0)
-	require.Greater(t, blobCount, 0)
+	coin := sdk.Coin{
+		Denom:  app.BondDenom,
+		Amount: sdk.NewInt(10),
+	}
 
-	opts := blobfactory.DefaultTxOpts()
+	opts := []blobtypes.TxBuilderOption{
+		blobtypes.SetFeeAmount(sdk.NewCoins(coin)),
+		blobtypes.SetGasLimit(100000000000000),
+	}
+
 	txs := make([]coretypes.Tx, len(accounts))
 	for i := 0; i < len(accounts); i++ {
-		addr := testfactory.GetAddress(kr, accounts[i])
-		signer, err := user.NewSigner(kr, nil, addr, cfg, chainid, accountNum, sequence)
-		require.NoError(t, err)
+		signer := blobtypes.NewKeyringSigner(kr, accounts[i], chainid)
 
+		addr, err := signer.GetSignerInfo().GetAddress()
+		if err != nil {
+			panic(err)
+		}
+
+		signer.SetAccountNumber(accountNum)
+		signer.SetSequence(sequence)
+
+		if size <= 0 {
+			panic("size should be positive")
+		}
 		randomizedSize := size
 		if randSize {
 			randomizedSize = rand.Intn(size)
@@ -111,7 +154,9 @@ func RandBlobTxsWithManualSequence(
 				randomizedSize = 1
 			}
 		}
-
+		if blobCount <= 0 {
+			panic("blobCount should be strictly positive")
+		}
 		randomizedBlobCount := blobCount
 		if randSize {
 			randomizedBlobCount = rand.Intn(blobCount)
@@ -119,30 +164,30 @@ func RandBlobTxsWithManualSequence(
 				randomizedBlobCount = 1
 			}
 		}
-
 		msg, blobs := blobfactory.RandMsgPayForBlobsWithSigner(tmrand.NewRand(), addr.String(), randomizedSize, randomizedBlobCount)
-		tx, err := signer.CreateTx([]sdk.Msg{msg}, opts...)
-		require.NoError(t, err)
-		if invalidSignature {
-			builder := cfg.NewTxBuilder()
-			for _, opt := range opts {
-				builder = opt(builder)
-			}
-			require.NoError(t, builder.SetMsgs(msg))
-			err := builder.SetSignatures(signing.SignatureV2{
-				PubKey: signer.PubKey(),
-				Data: &signing.SingleSignatureData{
-					SignMode:  signing.SignMode_SIGN_MODE_DIRECT,
-					Signature: []byte("invalid signature"),
-				},
-				Sequence: signer.GetSequence(),
-			})
-			require.NoError(t, err)
-
-			tx, err = cfg.TxEncoder()(builder.GetTx())
-			require.NoError(t, err)
+		builder := signer.NewTxBuilder(opts...)
+		stx, err := signer.BuildSignedTx(builder, msg)
+		if err != nil {
+			panic(err)
 		}
-		cTx, err := blob.MarshalBlobTx(tx, blobs...)
+		if invalidSignature {
+			invalidSig, err := builder.GetTx().GetSignaturesV2()
+			if err != nil {
+				panic(err)
+			}
+			invalidSig[0].Data.(*signing.SingleSignatureData).Signature = []byte("invalid signature")
+
+			if err := builder.SetSignatures(invalidSig...); err != nil {
+				panic(err)
+			}
+
+			stx = builder.GetTx()
+		}
+		rawTx, err := signer.EncodeTx(stx)
+		if err != nil {
+			panic(err)
+		}
+		cTx, err := coretypes.MarshalBlobTx(rawTx, blobs...)
 		if err != nil {
 			panic(err)
 		}
@@ -158,15 +203,24 @@ func RandBlobTxsWithManualSequence(
 func SendTxsWithAccounts(
 	t *testing.T,
 	capp *app.App,
-	enc client.TxConfig,
+	enc sdk.TxEncoder,
 	kr keyring.Keyring,
 	amount uint64,
 	toAccount string,
 	accounts []string,
 	chainid string,
-	extraOpts ...user.TxOption,
+	extraOpts ...blobtypes.TxBuilderOption,
 ) []coretypes.Tx {
-	opts := append(blobfactory.DefaultTxOpts(), extraOpts...)
+	coin := sdk.Coin{
+		Denom:  app.BondDenom,
+		Amount: sdk.NewInt(10),
+	}
+
+	opts := []blobtypes.TxBuilderOption{
+		blobtypes.SetFeeAmount(sdk.NewCoins(coin)),
+		blobtypes.SetGasLimit(1000000),
+	}
+	opts = append(opts, extraOpts...)
 
 	txs := make([]coretypes.Tx, len(accounts))
 	for i := 0; i < len(accounts); i++ {
@@ -196,22 +250,30 @@ func SendTxsWithAccounts(
 // account info must be provided.
 func SendTxWithManualSequence(
 	t *testing.T,
-	cfg client.TxConfig,
+	_ sdk.TxEncoder,
 	kr keyring.Keyring,
 	fromAcc, toAcc string,
 	amount uint64,
 	chainid string,
 	sequence, accountNum uint64,
-	opts ...user.TxOption,
+	opts ...blobtypes.TxBuilderOption,
 ) coretypes.Tx {
+	signer := blobtypes.NewKeyringSigner(kr, fromAcc, chainid)
+
+	signer.SetAccountNumber(accountNum)
+	signer.SetSequence(sequence)
+
 	fromAddr, toAddr := getAddress(fromAcc, kr), getAddress(toAcc, kr)
-	signer, err := user.NewSigner(kr, nil, fromAddr, cfg, chainid, accountNum, sequence)
-	require.NoError(t, err)
 
 	msg := banktypes.NewMsgSend(fromAddr, toAddr, sdk.NewCoins(sdk.NewCoin(app.BondDenom, sdk.NewIntFromUint64(amount))))
-	stx, err := signer.CreateTx([]sdk.Msg{msg}, opts...)
+
+	stx, err := signer.BuildSignedTx(signer.NewTxBuilder(opts...), msg)
 	require.NoError(t, err)
-	return stx
+
+	rawTx, err := signer.EncodeTx(stx)
+	require.NoError(t, err)
+
+	return rawTx
 }
 
 func getAddress(account string, kr keyring.Keyring) sdk.AccAddress {

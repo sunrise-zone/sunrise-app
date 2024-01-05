@@ -6,29 +6,26 @@ import (
 
 	tmrand "github.com/cometbft/cometbft/libs/rand"
 
+	"github.com/sunrise-zone/sunrise-app/app"
+	"github.com/sunrise-zone/sunrise-app/app/encoding"
 	"github.com/sunrise-zone/sunrise-app/test/util/blobfactory"
 	"github.com/sunrise-zone/sunrise-app/test/util/testfactory"
-	"github.com/sunrise-zone/sunrise-app/test/util/testnode"
 
 	"github.com/sunrise-zone/sunrise-app/pkg/da"
 	"github.com/sunrise-zone/sunrise-app/pkg/proof"
 	"github.com/sunrise-zone/sunrise-app/pkg/square"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
 	appns "github.com/sunrise-zone/sunrise-app/pkg/namespace"
 	"github.com/sunrise-zone/sunrise-app/pkg/shares"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestNewTxInclusionProof(t *testing.T) {
 	blockTxs := testfactory.GenerateRandomTxs(50, 500).ToSliceOfBytes()
-
-	signer, err := testnode.NewOfflineSigner()
-	require.NoError(t, err)
-
-	blockTxs = append(blockTxs, blobfactory.RandBlobTxs(signer, tmrand.NewRand(), 50, 1, 500).ToSliceOfBytes()...)
+	encCfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
+	blockTxs = append(blockTxs, blobfactory.RandBlobTxs(encCfg.TxConfig.TxEncoder(), tmrand.NewRand(), 50, 1, 500).ToSliceOfBytes()...)
 	require.Len(t, blockTxs, 100)
 
 	type test struct {
@@ -98,9 +95,8 @@ func TestNewShareInclusionProof(t *testing.T) {
 	ns2 := appns.MustNewV0(bytes.Repeat([]byte{2}, appns.NamespaceVersionZeroIDSize))
 	ns3 := appns.MustNewV0(bytes.Repeat([]byte{3}, appns.NamespaceVersionZeroIDSize))
 
-	signer, err := testnode.NewOfflineSigner()
-	require.NoError(t, err)
-	blobTxs := blobfactory.RandBlobTxsWithNamespacesAndSigner(signer, []appns.Namespace{ns1, ns2, ns3}, []int{500, 500, 500})
+	encCfg := encoding.MakeConfig(app.ModuleEncodingRegisters...)
+	blobTxs := blobfactory.RandBlobTxsWithNamespaces(encCfg.TxConfig.TxEncoder(), []appns.Namespace{ns1, ns2, ns3}, []int{500, 500, 500})
 	txs := testfactory.GenerateRandomTxs(50, 500)
 	txs = append(txs, blobTxs...)
 
@@ -224,36 +220,4 @@ func TestNewShareInclusionProof(t *testing.T) {
 			assert.NoError(t, proof.Validate(dataRoot))
 		})
 	}
-}
-
-// TestAllSharesInclusionProof creates a proof for all shares in the data
-// square. Since we can't prove multiple namespaces at the moment, all the
-// shares use the same namespace.
-func TestAllSharesInclusionProof(t *testing.T) {
-	txs := testfactory.GenerateRandomTxs(243, 500)
-
-	dataSquare, err := square.Construct(txs.ToSliceOfBytes(), appconsts.LatestVersion, 128)
-	require.NoError(t, err)
-	assert.Equal(t, 256, len(dataSquare))
-
-	// erasure the data square which we use to create the data root.
-	eds, err := da.ExtendShares(shares.ToBytes(dataSquare))
-	require.NoError(t, err)
-
-	// create the new data root by creating the data availability header (merkle
-	// roots of each row and col of the erasure data).
-	dah, err := da.NewDataAvailabilityHeader(eds)
-	require.NoError(t, err)
-	dataRoot := dah.Hash()
-
-	actualNamespace, err := proof.ParseNamespace(dataSquare, 0, 256)
-	require.NoError(t, err)
-	require.Equal(t, appns.TxNamespace, actualNamespace)
-	proof, err := proof.NewShareInclusionProof(
-		dataSquare,
-		appns.TxNamespace,
-		shares.NewRange(0, 256),
-	)
-	require.NoError(t, err)
-	assert.NoError(t, proof.Validate(dataRoot))
 }

@@ -8,12 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sunrise-zone/sunrise-app/app/encoding"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-	blobtypes "github.com/sunrise-zone/sunrise-app/x/blob/types"
-
+	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	tmtypes "github.com/cometbft/cometbft/types"
 	"github.com/cosmos/cosmos-sdk/client"
-	"github.com/cosmos/cosmos-sdk/client/grpc/cmtservice"
+	tmservice "github.com/cosmos/cosmos-sdk/client/grpc/cmtservice"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdktypes "github.com/cosmos/cosmos-sdk/types"
@@ -21,6 +19,8 @@ import (
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
 	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	"github.com/sunrise-zone/sunrise-app/app/encoding"
+	blob "github.com/sunrise-zone/sunrise-app/x/blob/types"
 	"google.golang.org/grpc"
 )
 
@@ -108,7 +108,7 @@ func SetupSigner(
 	address sdktypes.AccAddress,
 	encCfg encoding.Config,
 ) (*Signer, error) {
-	resp, err := cmtservice.NewServiceClient(conn).GetLatestBlock(ctx, &cmtservice.GetLatestBlockRequest{})
+	resp, err := tmservice.NewServiceClient(conn).GetLatestBlock(ctx, &tmservice.GetLatestBlockRequest{})
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func (s *Signer) SubmitTx(ctx context.Context, msgs []sdktypes.Msg, opts ...TxOp
 
 // SubmitPayForBlob forms a transaction from the provided blobs, signs it, and submits it to the chain.
 // TxOptions may be provided to set the fee and gas limit.
-func (s *Signer) SubmitPayForBlob(ctx context.Context, blobs []*blob.Blob, opts ...TxOption) (*sdktypes.TxResponse, error) {
+func (s *Signer) SubmitPayForBlob(ctx context.Context, blobs []*tmproto.Blob, opts ...TxOption) (*sdktypes.TxResponse, error) {
 	txBytes, err := s.CreatePayForBlob(blobs, opts...)
 	if err != nil {
 		return nil, err
@@ -175,8 +175,8 @@ func (s *Signer) CreateTx(msgs []sdktypes.Msg, opts ...TxOption) ([]byte, error)
 	return s.enc.TxEncoder()(txBuilder.GetTx())
 }
 
-func (s *Signer) CreatePayForBlob(blobs []*blob.Blob, opts ...TxOption) ([]byte, error) {
-	msg, err := blobtypes.NewMsgPayForBlobs(s.address.String(), blobs...)
+func (s *Signer) CreatePayForBlob(blobs []*tmproto.Blob, opts ...TxOption) ([]byte, error) {
+	msg, err := blob.NewMsgPayForBlobs(s.address.String(), blobs...)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +186,7 @@ func (s *Signer) CreatePayForBlob(blobs []*blob.Blob, opts ...TxOption) ([]byte,
 		return nil, err
 	}
 
-	return blob.MarshalBlobTx(txBytes, blobs...)
+	return tmtypes.MarshalBlobTx(txBytes, blobs...)
 }
 
 // BroadcastTx submits the provided transaction bytes to the chain and returns the response.
@@ -268,7 +268,7 @@ func (s *Signer) PubKey() cryptotypes.PubKey {
 	return s.pk
 }
 
-// GetSequence gets the latest signed sequence and increments the local sequence number
+// GetSequencer gets the lastest signed sequnce and increments the local sequence number
 func (s *Signer) GetSequence() uint64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -286,16 +286,13 @@ func (s *Signer) ForceSetSequence(seq uint64) {
 }
 
 func (s *Signer) signTransaction(builder client.TxBuilder) error {
-	signers, err := builder.GetTx().GetSigners()
-	if err != nil {
-		return err
-	}
+	signers, _ := builder.GetTx().GetSigners()
 	if len(signers) != 1 {
 		return fmt.Errorf("expected 1 signer, got %d", len(signers))
 	}
 
-	if !s.address.Equals(sdktypes.AccAddress(signers[0])) {
-		return fmt.Errorf("expected signer %s, got %s", s.address.String(), sdktypes.AccAddress(signers[0]).String())
+	if !s.address.Equals(signers[0]) {
+		return fmt.Errorf("expected signer %s, got %s", s.address.String(), signers[0].String())
 	}
 
 	sequence := s.GetSequence()
@@ -311,7 +308,7 @@ func (s *Signer) signTransaction(builder client.TxBuilder) error {
 		Sequence: sequence,
 	}
 
-	err = builder.SetSignatures(draftsigV2)
+	err := builder.SetSignatures(draftsigV2)
 	if err != nil {
 		return fmt.Errorf("error setting draft signatures: %w", err)
 	}
@@ -348,7 +345,6 @@ func (s *Signer) createSignature(builder client.TxBuilder, sequence uint64) ([]b
 	}
 
 	bytesToSign, err := s.enc.SignModeHandler().GetSignBytes(
-		ctx,
 		signing.SignMode_SIGN_MODE_DIRECT,
 		signerData,
 		builder.GetTx(),
@@ -357,7 +353,7 @@ func (s *Signer) createSignature(builder client.TxBuilder, sequence uint64) ([]b
 		return nil, fmt.Errorf("error getting sign bytes: %w", err)
 	}
 
-	signature, _, err := s.keys.SignByAddress(s.address, bytesToSign, signing.SignMode_SIGN_MODE_DIRECT)
+	signature, _, err := s.keys.SignByAddress(s.address, bytesToSign)
 	if err != nil {
 		return nil, fmt.Errorf("error signing bytes: %w", err)
 	}

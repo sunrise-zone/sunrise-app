@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
-	"github.com/sunrise-zone/sunrise-app/pkg/blob"
-
 	coretypes "github.com/cometbft/cometbft/types"
+	"github.com/sunrise-zone/sunrise-app/pkg/appconsts"
 )
 
 // ParseTxs collects all of the transactions from the shares provided
@@ -28,10 +26,10 @@ func ParseTxs(shares []Share) (coretypes.Txs, error) {
 }
 
 // ParseBlobs collects all blobs from the shares provided
-func ParseBlobs(shares []Share) ([]*blob.Blob, error) {
+func ParseBlobs(shares []Share) ([]coretypes.Blob, error) {
 	blobList, err := parseSparseShares(shares, appconsts.SupportedShareVersions)
 	if err != nil {
-		return []*blob.Blob{}, err
+		return []coretypes.Blob{}, err
 	}
 
 	return blobList, nil
